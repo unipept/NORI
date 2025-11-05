@@ -209,7 +209,7 @@ impl CTFactorGraph {
         for graph_xml in root.children().filter(|n| n.name() == "graph") {
             for node_xml in graph_xml.children().filter(|n| n.name() == "node") {
                 let node: Node = Node::parse_node(node_xml, next_node_id)?;
-                let node_name: String = node.get_name().to_string();
+                let node_name: String = node.get_name()?.to_string();
                 node_map.insert(node_name, next_node_id);
                 next_node_id += 1;
 
@@ -233,10 +233,36 @@ impl CTFactorGraph {
                 edges.push(edge);
             }
         }
+        
+        let mut graph = CTFactorGraph { nodes, edges };
+        graph.add_factor_nodes();
     
-        Ok( CTFactorGraph { nodes, edges })
+        Ok( graph )
     }
 
+    pub fn add_factor_nodes(&mut self) {
+        let mut next_node_id = self.node_count();
+        let mut next_edge_id = self.edge_count();
+        let mut new_nodes = Vec::new();
+        for node in &mut self.nodes {
+            if node.is_input_node() {
+                let mut new_variable_node = Node::new(next_node_id, node.get_subtype().clone());
+                next_node_id += 1;
+                node.set_subtype(NodeType::FactorNode { initial_belief: Vec::new() });
+                new_nodes.push(new_variable_node.clone());
+
+                let edge = Edge::new(next_edge_id, new_variable_node.get_id(), node.get_id(), node.neighbors_count(), 0, None);
+                self.edges.push(edge);
+                node.add_incident_edge(next_edge_id);
+                new_variable_node.add_incident_edge(next_edge_id);
+                next_edge_id += 1;
+            }
+        }
+
+        for node in new_nodes { 
+            self.nodes.push(node);
+        }
+    }
 
     /// Fills all nodes with a prior probability.
     ///
@@ -327,9 +353,8 @@ impl CTFactorGraph {
             if node.is_factor_node() {
                 if node.neighbors_count() > 2 {
                 
-                    // TODO: names necessary? These nodes are added after graphml is created, because this is executed in execute_pepgm. The names are not contained in any output I think. For the algorithm itself, strings are inefficient
                     let new_node_id = next_node_id;
-                    let new_node = Node::new_convolution_node(new_node_id, node.neighbors_count() - 1);
+                    let new_node = Node::new_convolution_node(new_node_id);
                     next_node_id += 1;
                     new_nodes.push(new_node);
 

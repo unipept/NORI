@@ -8,11 +8,11 @@ use std::fmt::Write;
 #[derive(Debug, Serialize, Clone)]
 pub enum NodeType {
     /// Variable node with prior probabilities.
-    VariableNode { output: bool, name: String, initial_belief_0: f64, initial_belief_1: f64 },
-    /// Factor node with parent count and CPD.
-    FactorNode { parent_number: u32, initial_belief: Vec<[f64; 2]> },
-    /// Convolution tree node with a number of parents.
-    ConvolutionTreeNode { number_of_parents: u32 }
+    VariableNode { output: bool, name: String, initial_belief: [f64; 2] },
+    /// Factor node with CPD.
+    FactorNode { initial_belief: Vec<[f64; 2]> },
+    /// Convolution tree node.
+    ConvolutionTreeNode
 }
 
 
@@ -20,7 +20,6 @@ pub enum NodeType {
 #[derive(Debug, Clone)]
 pub struct Node {
     id: u32,
-    name: String,
     incident_edges: Vec<u32>,
     subtype: NodeType
 }
@@ -36,14 +35,17 @@ impl Node {
     ///
     /// # Returns
     /// A new `Node`.
-    pub fn new(id: usize, name: String, subtype: NodeType) -> Self {
+    pub fn new(id: usize, subtype: NodeType) -> Self {
         let incident_edges: Vec<u32> = Vec::new();
      
-        Self { id: id as u32, name, incident_edges, subtype }
+        Self { id: id as u32, incident_edges, subtype }
     }
 
-    pub fn get_name(&self) -> &str {
-        &self.name
+    pub fn get_name(&self) -> Result<&str, Box<dyn std::error::Error>> {
+        if let NodeType::VariableNode { name, .. } = self.get_subtype() {
+            return Ok(name);
+        }
+        Err("get_name called only callable on variable node".into())
     }
 
     /// Creates a copy of the node with a new ID.
@@ -63,12 +65,11 @@ impl Node {
     ///
     /// # Arguments
     /// * `id` - Node ID.
-    /// * `number_of_parents` - Number of parents in convolution tree.
     ///
     /// # Returns
     /// A new convolution tree node.
-    pub fn new_convolution_node(id: usize, number_of_parents: usize) -> Self {
-        Self { id: id as u32, name: "CTree".to_string(), incident_edges: Vec::new(), subtype: NodeType::ConvolutionTreeNode { number_of_parents: number_of_parents as u32 } }
+    pub fn new_convolution_node(id: usize) -> Self {
+        Self { id: id as u32, incident_edges: Vec::new(), subtype: NodeType::ConvolutionTreeNode }
     }
 
     /// Adds an incident edge to the node.
@@ -140,6 +141,10 @@ impl Node {
         matches!(self.subtype, NodeType::VariableNode { output: true , .. })
     }
 
+    pub fn is_input_node(&self) -> bool {
+        matches!(self.subtype, NodeType::VariableNode { output: false , .. })
+    }
+
     /// Checks if the node is a convolution node.
     pub fn is_convolution_tree_node(&self) -> bool {
         matches!(self.subtype, NodeType::ConvolutionTreeNode { .. })
@@ -151,7 +156,7 @@ impl Node {
     /// * `prior` - Probability to assign as active.
     pub fn fill_in_prior(&mut self, prior: f64) {
         if let NodeType::VariableNode { output, name, .. } = &self.subtype {
-            self.subtype = NodeType::VariableNode { output: *output, name: name.to_string(), initial_belief_0: 1.0 - prior, initial_belief_1: prior };
+            self.subtype = NodeType::VariableNode { output: *output, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
         }
     }
 
@@ -162,13 +167,13 @@ impl Node {
     /// * `beta` - Noise parameter.
     /// * `regularized` - Whether to apply parent-count regularization.
     pub fn fill_in_factor(&mut self, alpha: f64, beta: f64, regularized: bool) {
-        if let NodeType::FactorNode { parent_number, .. } = self.subtype {
-            let degree: usize = parent_number as usize;
+        if self.is_factor_node() {
+            let degree: usize = self.neighbors_count();
 
-            let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree + 1);
-            let mut cpd_array_regularized = Vec::with_capacity(degree + 1);
-            let exponent_array: Vec<usize> = (0..=degree).collect();
-            let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..=degree).map(|x| x as f64).collect();
+            let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree);
+            let mut cpd_array_regularized = Vec::with_capacity(degree);
+            let exponent_array: Vec<usize> = (0..degree).collect();
+            let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..degree).map(|x| x as f64).collect();
             
             // regularize cpd priors to penalize higher number of parents
             // log domain to avoid underflow
@@ -194,7 +199,7 @@ impl Node {
             let initial_belief = if regularized { cpd_array_regularized } else { cpd_array };
             
             // Add factor to the node's attributes
-            self.subtype = NodeType::FactorNode { parent_number: parent_number, initial_belief: initial_belief };
+            self.subtype = NodeType::FactorNode { initial_belief };
         }
     }
 
@@ -253,27 +258,28 @@ impl Node {
             current_node_data.insert(data_key, data_val);
         }
     
-        let subtype: NodeType = match current_node_data.get("d2").map(String::as_str) {
-            Some("factor") => {
-                let parent_number: usize = current_node_data.get("d3").ok_or("d3 not found while parsing factor Node")?.parse()?;
-                NodeType::FactorNode { parent_number: parent_number as u32, initial_belief: Vec::new() }
-            }
-            Some("peptide") => {
-                let initial_belief_0: f64 = current_node_data.get("d0").ok_or("d0 not found while parsing peptide Node")?.parse()?;
-                let initial_belief_1: f64 = current_node_data.get("d1").ok_or("d1 not found while parsing peptide Node")?.parse()?;
-                NodeType::VariableNode { output: false, name: name.clone(), initial_belief_0, initial_belief_1 }
-            }
-            Some("taxon") => {
-                let initial_belief_0: f64 = 0.0;
-                let initial_belief_1: f64 = 0.0;
-                NodeType::VariableNode { output: true, name: name.clone(), initial_belief_0, initial_belief_1 }
-            }
+        let subtype: NodeType = match current_node_data.get("type").map(String::as_str) {
+            Some("input") => {
+                let belief_str = current_node_data.get("belief").ok_or("belief not found while parsing input node")?;
+
+                let beliefs: Vec<f64> = belief_str
+                    .trim_matches(|c| c == '[' || c == ']').trim()
+                    .split(',').map(|s| s.trim().parse::<f64>())
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let belief: [f64; 2] = [beliefs[0], beliefs[1]];
+
+                NodeType::VariableNode { output: false, name: name.clone(), initial_belief: belief }
+            },
+            Some("output") => {
+                NodeType::VariableNode { output: true, name: name.clone(), initial_belief: [0.0, 0.0] }
+            },
             _ => {
                 return Err("Node data has unknown type".into());
             }
         };
 
-        Ok(Self { id: id as u32, name, incident_edges: Vec::new(), subtype })
+        Ok(Self { id: id as u32, incident_edges: Vec::new(), subtype })
     }
 }
 
@@ -283,12 +289,10 @@ mod tests {
     use super::*;
     use minidom::Element;
 
-    fn dummy_factor_node(id: usize, parent_number: usize) -> Node {
+    fn dummy_factor_node(id: usize) -> Node {
         Node::new(
             id,
-            format!("factor_{}", id),
             NodeType::FactorNode {
-                parent_number: parent_number as u32,
                 initial_belief: vec::new(),
             },
         )
@@ -296,14 +300,14 @@ mod tests {
 
     #[test]
     fn test_new_and_getters() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief_0: 0.3, initial_belief_1: 0.7 });
+        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.3, 0.7] });
         assert_eq!(node.get_id(), 1);
         assert!(!node.is_factor_node());
     }
 
     #[test]
     fn test_copy_with_id() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief_0: 0.0, initial_belief_1: 1.0 });
+        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.0, 1.0] });
         let copy = node.copy_with_id(42);
         assert_eq!(copy.get_id(), 42);
     }
@@ -316,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_incident_edges() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief_0: 0.1, initial_belief_1: 0.9 });
+        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.1, 0.9] });
         node.add_incident_edge(5);
         assert_eq!(node.neighbors_count(), 1);
         assert_eq!(node.get_incident_edge(0), 5);
@@ -329,18 +333,18 @@ mod tests {
 
     #[test]
     fn test_set_and_get_subtype() {
-        let mut node = Node::new(1, NodeType::FactorNode { number_of_parents: 2, initial_belief: Vec::new() });
-        node.set_subtype(NodeType::VariableNode { output: false, name: "node1", initial_belief_0: 0.5, initial_belief_1: 0.5 });
+        let mut node = Node::new(1, NodeType::FactorNode { initial_belief: Vec::new() });
+        node.set_subtype(NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.5, 0.5] });
         assert!(matches!(node.get_subtype(), NodeType::VariableNode { .. }));
     }
 
     #[test]
     fn test_fill_in_prior() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief_0: 0.0, initial_belief_1: 0.0 });
+        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.0, 0.0] });
         node.fill_in_prior(0.8);
-        if let NodeType::VariableNode { initial_belief_0, initial_belief_1 } = node.get_subtype() {
-            assert!((*initial_belief_0 - 0.2).abs() < 1e-9);
-            assert!((*initial_belief_1 - 0.8).abs() < 1e-9);
+        if let NodeType::VariableNode { initial_belief } = node.get_subtype() {
+            assert!((*initial_belief[0] - 0.2).abs() < 1e-9);
+            assert!((*initial_belief[1] - 0.8).abs() < 1e-9);
         } else {
             panic!("expected variable node");
         }

@@ -12,7 +12,7 @@ use crate::array_utils::sum_logs_batched;
 #[derive(Debug, Clone)]
 pub enum NodeBelief {
     /// Belief for variable nodes: two probabilities (inactive, active).
-    VariableBelief(f64, f64),
+    VariableBelief([f64; 2]),
     /// Belief for factor nodes: list of probability pairs.
     FactorBelief(Vec<[f64;2]>),
     /// Belief placeholder for convolution tree nodes.
@@ -29,7 +29,7 @@ pub enum NodeBelief {
 /// The corresponding `NodeBelief`.
 pub fn get_initial_belief(node: &Node) -> NodeBelief {
     match node.get_subtype() {
-        NodeType::VariableNode { initial_belief_0, initial_belief_1, .. } => NodeBelief::VariableBelief(*initial_belief_0, *initial_belief_1),
+        NodeType::VariableNode { initial_belief, .. } => NodeBelief::VariableBelief(*initial_belief),
         NodeType::FactorNode { initial_belief, .. } => NodeBelief::FactorBelief(initial_belief.clone()),
         NodeType::ConvolutionTreeNode { .. } => NodeBelief::ConvolutionTreeBelief
     }
@@ -44,7 +44,7 @@ impl NodeBelief {
     /// Vector of belief values.
     pub fn values(&self) -> Vec<f64> {
         match self {
-            NodeBelief::VariableBelief(a, b) => vec![*a, *b],
+            NodeBelief::VariableBelief([a, b]) => vec![*a, *b],
             NodeBelief::FactorBelief(vec) => vec.iter().flat_map(|arr| arr.to_vec()).collect(),
             NodeBelief::ConvolutionTreeBelief => vec![1.0;4],
         }
@@ -57,7 +57,7 @@ impl NodeBelief {
     /// * `None` if the node is a factor or convolution tree node.
     pub fn variable_values(&self) -> Option<[f64; 2]> {
         match self {
-            NodeBelief::VariableBelief(a, b) => Some([*a, *b]),
+            NodeBelief::VariableBelief(belief) => Some(*belief),
             _ => None
         }
     }
@@ -412,7 +412,7 @@ impl Messages {
                     let mut logged_variable_marginal: [f64; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
                     log_normalize(&mut logged_variable_marginal);
 
-                    self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal[0], logged_variable_marginal[1]);
+                    self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
                 },
                 _ => {}
             }
@@ -715,27 +715,21 @@ mod tests {
         let variable_node_1 = Node::new(
             0,
             "peptide1".to_string(),
-            NodeType::VariableNode { initial_belief_0: 0.7, initial_belief_1: 0.3 }
+            NodeType::VariableNode { initial_belief: [0.7, 0.3] }
         );
         nodes.push(variable_node_1);
 
         let factor_node_1 = Node::new(
             1,
             "factor1".to_string(),
-            NodeType::FactorNode { 
-                parent_number: 2, 
-                initial_belief: Factor { 
-                    array: vec![[0.6, 0.4], [0.2, 0.8]], 
-                    array_labels: vec!["p0".to_string(), "p1".to_string()] 
-                } 
-            }
+            NodeType::FactorNode { initial_belief: vec![[0.6, 0.4], [0.2, 0.8]] }
         );
         nodes.push(factor_node_1);
 
         let variable_node_2 = Node::new(
             2,
             "taxon_1".to_string(),
-            NodeType::VariableNode { initial_belief_0: 0.5, initial_belief_1: 0.5 }
+            NodeType::VariableNode { initial_belief: [0.5, 0.5] }
         );
         nodes.push(variable_node_2);
 
@@ -760,12 +754,12 @@ mod tests {
         let variable_node = Node::new(
             0,
             "variable1".to_string(),
-            NodeType::VariableNode { initial_belief_0: 0.6, initial_belief_1: 0.4 }
+            NodeType::VariableNode { initial_belief: [0.6, 0.4] }
         );
 
-        if let NodeType::VariableNode { initial_belief_0, initial_belief_1 } = variable_node.get_subtype() {
-            assert!((initial_belief_0 - 0.6).abs() < 1e-10);
-            assert!((initial_belief_1 - 0.4).abs() < 1e-10);
+        if let NodeType::VariableNode { initial_belief } = variable_node.get_subtype() {
+            assert!((initial_belief[0] - 0.6).abs() < 1e-10);
+            assert!((initial_belief[1] - 0.4).abs() < 1e-10);
         } else {
             panic!("Expected VariableNode");
         }
@@ -773,14 +767,10 @@ mod tests {
         let factor_node = Node::new(
             1,
             "factor1".to_string(),
-            NodeType::FactorNode {
-                parent_number: 2,
-                initial_belief: Factor { array: vec![[0.5, 0.5], [0.3, 0.7]], array_labels: vec!["p0".to_string(), "p1".to_string()] }
-            }
+            NodeType::FactorNode { initial_belief: vec![[0.5, 0.5], [0.3, 0.7]] }
         );
 
-        if let NodeType::FactorNode { parent_number, initial_belief } = factor_node.get_subtype() {
-            assert_eq!(*parent_number, 2);
+        if let NodeType::FactorNode { initial_belief } = factor_node.get_subtype() {
             assert_eq!(initial_belief.array.len(), 2);
             assert!((initial_belief.array[0][0] - 0.5).abs() < 1e-10);
             assert!((initial_belief.array[1][1] - 0.7).abs() < 1e-10);
@@ -791,8 +781,7 @@ mod tests {
 
         let ct_node = Node::new_convolution_node(3, "ct1".to_string(), 4);
 
-        if let NodeType::ConvolutionTreeNode { number_of_parents } = ct_node.get_subtype() {
-            assert_eq!(*number_of_parents, 4);
+        if let NodeType::ConvolutionTreeNode = ct_node.get_subtype() {
         } else {
             panic!("Expected ConvolutionTreeNode");
         }
