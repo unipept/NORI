@@ -25,17 +25,14 @@ fn calibrate_all_subgraphs(
     ct_factor_graphs: Vec<CTFactorGraph>,
     max_iterations: u32,
     tolerance: f64
-) -> Result<(Vec<String>, Vec<Vec<f64>>), Box<dyn std::error::Error>>{
-    let mut results: Vec<Vec<f64>> = Vec::new();
-    let mut node_names: Vec<String> = Vec::new();
+) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>>{
+    let mut results: Vec<(String, Vec<f64>)> = Vec::new();
 
     for subgraph in ct_factor_graphs {
         if subgraph.node_count() > 2 {
 
-            subgraph.add_node_names(&mut node_names);
-
             let mut messages = Messages::new(subgraph);
-            let beliefs: Vec<Vec<f64>> = messages.zero_lookahead_bp(
+            let beliefs: Vec<(String, Vec<f64>)> = messages.zero_lookahead_bp(
                 max_iterations,
                 tolerance
             )?;
@@ -44,7 +41,7 @@ fn calibrate_all_subgraphs(
         }
     }
 
-    Ok((node_names, results))
+    Ok(results)
 }
 
 
@@ -83,13 +80,13 @@ pub fn run_belief_propagation(
     ct_factor_graph.add_ct_nodes();
     let ct_factor_graphs: Vec<CTFactorGraph> = ct_factor_graph.connected_components();
 
-    let (node_names, results) = calibrate_all_subgraphs(
+    let results = calibrate_all_subgraphs(
         ct_factor_graphs,
         max_iter,
         tol
     )?;
 
-    Ok(generate_csv(node_names, results)?)
+    Ok(generate_csv(results)?)
 }
 
 
@@ -103,59 +100,22 @@ pub fn run_belief_propagation(
 /// # Returns
 ///
 /// CSV string with columns `[node_name, posterior_probability_1, node_category]`.
-fn generate_csv(node_names: Vec<String>, results: Vec<Vec<f64>>) -> Result<String, Box<dyn std::error::Error>> {
+fn generate_csv(results: Vec<(String, Vec<f64>)>) -> Result<String, Box<dyn std::error::Error>> {
 
     let mut wtr = Writer::from_writer(vec![]);
 
-    for i in 0..node_names.len() {
+    for (node_name, belief) in results {
+        
         let _ = wtr.write_record(&[
-            node_names[i].clone(),
-            results[i][1].to_string(),
+            node_name,
+            format!("[{}]", belief.iter()
+                .map(|b| b.to_string()).collect::<Vec<_>>().join(",")),
         ])?;
     }
 
     let csv: String = String::from_utf8(wtr.into_inner()?)?;
 
     Ok(csv)
-}
-
-
-/// Parses a CSV string of belief propagation results and extracts taxon scores.
-///
-/// Only rows with type "taxon" are included. The results are sorted by score in ascending order.
-///
-/// # Arguments
-///
-/// * `csv_content` - CSV string with columns `[id, score, type]`.
-///
-/// # Returns
-///
-/// JSON string mapping taxon IDs (`usize`) to their posterior probabilities (`f64`), sorted by score.
-pub fn parse_taxon_scores(csv_content: String) -> Result<String, Box<dyn std::error::Error>> {
-    let mut rdr = ReaderBuilder::new()
-        .has_headers(false)
-        .from_reader(Cursor::new(csv_content));
-
-    let mut taxon_score_dict = HashMap::new();
-    let mut records = Vec::new();
-
-    for result in rdr.records() {
-        let record = result?;
-                
-        let id: usize = record.get(0).ok_or("Index 0 not in record")?.parse()?;
-        let score: f64 = record.get(1).ok_or("Index 1 not in record")?.parse()?;
-        records.push((id, score));
-    }
-
-    // Sort by score in ascending order
-    records.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("Partial compare returned None"));
-
-    // Populate the HashMap with sorted values
-    for (id, score) in records {
-        taxon_score_dict.insert(id, score);
-    }
-
-    Ok(serde_json::to_string(&taxon_score_dict)?)
 }
 
 

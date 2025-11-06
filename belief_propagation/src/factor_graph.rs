@@ -118,17 +118,6 @@ impl CTFactorGraph {
         CTFactorGraph { nodes, edges }
     }
 
-    /// Adds the names and categories of all nodes to the provided vectors.
-    ///
-    /// # Arguments
-    /// * `node_names` - Mutable reference to a vector to store node names.
-    /// * `node_categories` - Mutable reference to a vector to store node categories.
-    pub fn add_node_names(&self, node_names: &mut Vec<String>) {
-        for node in &self.nodes {
-            node_names.push(node.get_id().to_string());
-        }
-    } 
-
     /// Returns a reference to the node with the given ID.
     ///
     /// # Arguments

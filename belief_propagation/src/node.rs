@@ -45,7 +45,7 @@ impl Node {
         if let NodeType::VariableNode { name, .. } = self.get_subtype() {
             return Ok(name);
         }
-        Err("get_name called only callable on variable node".into())
+        Err("get_name called on a factor/convolution node".into())
     }
 
     /// Creates a copy of the node with a new ID.
@@ -130,11 +130,6 @@ impl Node {
     /// Checks if the node is a factor node.
     pub fn is_factor_node(&self) -> bool {
         matches!(self.subtype, NodeType::FactorNode { .. })
-    }
-
-    /// Checks if the node is a taxon node.
-    pub fn is_variable_node(&self) -> bool {
-        matches!(self.subtype, NodeType::VariableNode { .. })
     }
 
     pub fn is_output_node(&self) -> bool {

@@ -326,7 +326,7 @@ impl Messages {
     ///
     /// # Returns
     /// Final node beliefs as a list of value vectors.
-    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f64) -> Result<Vec<Vec<f64>>, Box<dyn std::error::Error>> {
+    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f64) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>> {
 
         let mut max_residual: f64 = f64::MAX;
 
@@ -418,7 +418,16 @@ impl Messages {
             }
         }
 
-        Ok(self.current_beliefs.iter().map(|b| b.values()).collect())
+        let output_beliefs: Result<Vec<_>, Box<dyn std::error::Error>> = self.graph.get_nodes().iter()
+            .filter(|n| n.is_output_node())
+            .map(|n| {
+                let name = n.get_name()?.to_string();
+                let values = self.current_beliefs[n.get_id()].values();
+                Ok((name, values))
+            })
+            .collect();
+
+        Ok(output_beliefs?)
     }
 
     /// Updates all outgoing messages from all nodes.

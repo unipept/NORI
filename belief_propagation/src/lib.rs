@@ -8,7 +8,7 @@ mod messages;
 mod node;
 mod zero_lookahead_belief_propagation;
 
-use crate::zero_lookahead_belief_propagation::{run_belief_propagation, parse_taxon_scores};
+use crate::zero_lookahead_belief_propagation::run_belief_propagation;
 
 
 /// Runs belief propagation on a factor graph provided as a GraphML string.
@@ -43,7 +43,5 @@ pub fn zero_lookahead_bp(
     let max_iter: u32 = max_iter.unwrap_or(10000);
     let tolerance: f64 = tolerance.unwrap_or(0.006);
     
-    let csv: String = run_belief_propagation(graph, alpha, beta, regularized, prior, max_iter, tolerance).unwrap();
-
-    parse_taxon_scores(csv).unwrap()
+    run_belief_propagation(graph, alpha, beta, regularized, prior, max_iter, tolerance).unwrap()
 }
