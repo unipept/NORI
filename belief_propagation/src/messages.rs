@@ -399,22 +399,19 @@ impl Messages {
 
         // marginalize once the model has converged
         for node in self.graph.get_nodes() {
-            match node.get_subtype() {
-                NodeType::VariableNode { .. } => {
-                    let incoming_messages: &Vec<[f64; 2]> = self.msg_in[node.get_id()].get_messages();
+            if node.is_output_node() {
+                let incoming_messages: &Vec<[f64; 2]> = self.msg_in[node.get_id()].get_messages();
                     
-                    let initial_belief: [f64; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
+                let initial_belief: [f64; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
 
-                    let sum_logs: [f64;2] = incoming_messages.iter()
-                        .fold([0.0;2], |mut acc,  row| {acc[0] += row[0].ln(); acc[1] += row[1].ln(); acc});
+                let sum_logs: [f64;2] = incoming_messages.iter()
+                    .fold([0.0;2], |mut acc,  row| {acc[0] += row[0].ln(); acc[1] += row[1].ln(); acc});
 
-                    // Compute final log-normalized message
-                    let mut logged_variable_marginal: [f64; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
-                    log_normalize(&mut logged_variable_marginal);
+                // Compute final log-normalized message
+                let mut logged_variable_marginal: [f64; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
+                log_normalize(&mut logged_variable_marginal);
 
-                    self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
-                },
-                _ => {}
+                self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
             }
         }
 

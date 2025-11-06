@@ -150,8 +150,8 @@ impl Node {
     /// # Arguments
     /// * `prior` - Probability to assign as active.
     pub fn fill_in_prior(&mut self, prior: f64) {
-        if let NodeType::VariableNode { output, name, .. } = &self.subtype {
-            self.subtype = NodeType::VariableNode { output: *output, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
+        if let NodeType::VariableNode { output: true , name, .. } = &self.subtype {
+            self.subtype = NodeType::VariableNode { output: true, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
         }
     }
 
