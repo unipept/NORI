@@ -1,10 +1,7 @@
 use crate::node::{Node, NodeType};
 use minidom::Element;
 use std::collections::{HashMap, HashSet};
-use serde::{Serialize, Deserialize};
-use std::fmt::Write;
-use csv::ReaderBuilder;
-
+use serde::{Serialize};
 
 /// Represents an edge in a factor graph connecting two nodes.
 #[derive(Debug, Serialize, Clone)]
@@ -275,17 +272,6 @@ impl CTFactorGraph {
         }
     }
 
-    /// Returns the IDs of neighbors of a node, given its node ID.
-    ///
-    /// # Arguments
-    /// * `node_id` - The node ID for which neighbors are requested.
-    ///
-    /// # Returns
-    /// A vector of node IDs representing neighbors.
-    pub fn get_neighbors_from_id(&self, node_id: usize) -> impl Iterator<Item = usize> + use<'_> {
-        self.get_neighbors(self.get_node(node_id))
-    }
-
     /// Returns the IDs of neighbors for a given node.
     ///
     /// # Arguments
@@ -298,6 +284,15 @@ impl CTFactorGraph {
             let (node1_id, node2_id) = self.edges[edge_id].get_node_ids();
             if node1_id == node.get_id() { node2_id } else { node1_id }
         })
+    }
+
+    pub fn get_neighbors_ids(&self, node: &Node) -> Vec<usize> {
+        let neighbors: Vec<usize> = node.get_incident_edges().map(|edge_id| {
+            let (node1_id, node2_id) = self.edges[edge_id].get_node_ids();
+            if node1_id == node.get_id() { node2_id } else { node1_id }
+        }).collect();
+
+        neighbors
     }
 
     /// Returns the node ID of a neighbor given a node and its neighbor ID.

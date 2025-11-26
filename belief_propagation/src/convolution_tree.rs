@@ -3,8 +3,8 @@ use crate::array_utils::normalize;
 
 #[derive(Debug, Clone)]
 struct CTNode {
-    joint_above: Vec<f64>,
-    likelihood_below: Option<Vec<f64>>,
+    joint_above: Vec<Vec<f64>>,
+    likelihood_below: Option<Vec<Vec<f64>>>,
 }
 
 impl CTNode {
@@ -14,8 +14,11 @@ impl CTNode {
     /// 
     /// # Arguments
     /// * `joint_above` - A vector of probabilities for this node.
-    fn new(mut joint_above: Vec<f64>) -> Self {
-        normalize(&mut joint_above);
+    fn new(mut joint_above: Vec<Vec<f64>>) -> Self {
+        for joint in &mut joint_above {
+            normalize(joint);
+        }
+
         Self {
             joint_above: joint_above,
             likelihood_below: None,
@@ -30,8 +33,12 @@ impl CTNode {
     /// 
     /// # Returns
     /// A new CTNode representing the combined distribution.
-    fn create_count_node(lhs: CTNode, rhs: CTNode) -> CTNode {
-        let joint_above = fft_convolve(&lhs.joint_above, &rhs.joint_above);
+    fn create_count_node(lhs: &CTNode, rhs: &CTNode) -> CTNode {
+        let mut joint_above = Vec::with_capacity(lhs.joint_above.len());
+        for (joint_lhs, joint_rhs) in lhs.joint_above.iter().zip(rhs.joint_above.iter()) {
+            joint_above.push(fft_convolve(joint_lhs, joint_rhs));
+        }
+
         let node = CTNode::new(joint_above);
         node
     }
@@ -44,15 +51,20 @@ impl CTNode {
     /// 
     /// # Returns
     /// A normalized probability vector representing the upward message.
-    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f64>) -> Vec<f64> {
-        let likelihood = self.likelihood_below.as_ref().expect("Likelihood below is None!");
-        let starting_point = other_joint_vector.len() - 1;
-        let result = fft_convolve(
-            &other_joint_vector.iter().rev().cloned().collect::<Vec<f64>>(),
-            likelihood,
-        );
-        let mut result = result[starting_point..starting_point + answer_size].to_vec();
-        normalize(&mut result);
+    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+        let mut result: Vec<Vec<f64>> = Vec::with_capacity(other_joint_vector.len());
+        let likelihood_below = self.likelihood_below.as_ref().expect("Likelihood below is None!");
+        for (likelihood, joint_vector) in likelihood_below.iter().zip(other_joint_vector.iter()) {
+            let starting_point = joint_vector.len() - 1;
+            let new_likelihood = fft_convolve(
+                &joint_vector.iter().rev().cloned().collect::<Vec<f64>>(),
+                likelihood,
+            );
+            let mut new_likelihood = new_likelihood[starting_point..starting_point + answer_size].to_vec();
+            normalize(&mut new_likelihood);
+            result.push(new_likelihood)
+        }
+
         result
     }
 
@@ -60,8 +72,8 @@ impl CTNode {
     /// 
     /// # Returns
     /// A vector of probabilities from the likelihood below.
-    fn messages_up(&self) -> Vec<f64> {
-        self.likelihood_below.clone().expect("Likelihood below is None!")
+    fn messages_up(&self) -> &Vec<Vec<f64>> {
+        self.likelihood_below.as_ref().expect("Likelihood below is None!")
     }
 }
 
@@ -70,8 +82,8 @@ pub struct ConvolutionTree {
     n_to_shared_likelihoods: Vec<f64>,
     log_length: usize,
     all_layers: Vec<Vec<CTNode>>,
-    protein_layer: Vec<CTNode>,
-    n_proteins: usize
+    variable_layer: Vec<CTNode>,
+    n_variables: usize
 }
 
 impl ConvolutionTree {
@@ -83,17 +95,18 @@ impl ConvolutionTree {
     /// 
     /// # Returns
     /// A fully constructed ConvolutionTree with messages propagated backward.
-    pub fn new(n_to_shared_likelihoods: Vec<f64>, proteins: Vec<[f64; 2]>) -> Result<Self, Box<dyn std::error::Error>> {
-        let log_length = (proteins.len() as f64).log2().ceil() as usize;
+    pub fn new(n_to_shared_likelihoods: &Vec<f64>, variables: &Vec<f64>, var_len: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let n_variables = variables.len() / var_len;
+        let log_length = (n_variables as f64).log2().ceil() as usize;
         let mut tree = ConvolutionTree {
-            n_to_shared_likelihoods,
+            n_to_shared_likelihoods: n_to_shared_likelihoods.clone(),
             log_length,
-            all_layers: Vec::new(),
-            protein_layer: Vec::new(),
-            n_proteins: proteins.len()
+            all_layers: Vec::new(), 
+            variable_layer: Vec::new(),
+            n_variables: n_variables
         };
 
-        tree.build_first_layer(proteins);
+        tree.build_first_layer(variables, var_len);
         tree.build_remaining_layers()?;
         tree.propagate_backward();
 
@@ -105,12 +118,16 @@ impl ConvolutionTree {
     /// 
     /// # Arguments
     /// * `proteins` - A vector of protein probability distributions.
-    fn build_first_layer(&mut self, proteins: Vec<[f64; 2]>) {
-        let mut layer = proteins.into_iter().map(|arr| CTNode::new(arr.to_vec())).collect::<Vec<CTNode>>();
+    fn build_first_layer(&mut self, variables: &Vec<f64>, var_len: usize) {
+        let mut layer = Vec::with_capacity(2usize.pow(self.log_length as u32));
+        for variable in variables.chunks_exact(var_len) {
+            let likelihood_counts: Vec<Vec<f64>> = variable.iter().map(|&v| vec![1.0 - v, v]).collect();
+            layer.push(CTNode::new(likelihood_counts));
+        }
 
         // Pad with dummy nodes to make the length a power of 2
         while layer.len() < 2usize.pow(self.log_length as u32) {
-            layer.push(CTNode::new(vec![1.0, 0.0]));
+            layer.push(CTNode::new(vec![vec![1.0, 0.0]; var_len]));
         }
 
         self.all_layers.push(layer);
@@ -124,16 +141,19 @@ impl ConvolutionTree {
             let mut new_layer = Vec::new();
 
             for i in (0..most_recent_layer.len()).step_by(2) {
-                let left = most_recent_layer[i].clone();
-                let right = most_recent_layer[i + 1].clone();
+                let left = &most_recent_layer[i];
+                let right = &most_recent_layer[i + 1];
                 new_layer.push(CTNode::create_count_node(left, right));
             }
 
             self.all_layers.push(new_layer);
         }
 
-        let mut likelihood_below = self.n_to_shared_likelihoods.clone();
-        normalize(&mut likelihood_below);
+        let likelihood_below: Vec<Vec<f64>> = self.n_to_shared_likelihoods.chunks(self.n_variables+1).map(|chunk| {
+            let mut likelihood = chunk.to_vec();
+            normalize(&mut likelihood);
+            likelihood
+        }).collect();
         self.all_layers.last_mut().ok_or("last() called on an empty vector")?[0].likelihood_below = Some(likelihood_below);
 
         Ok(())
@@ -149,15 +169,15 @@ impl ConvolutionTree {
                 let right_parent = &self.all_layers[l-1][2*i + 1];
                 let node = &self.all_layers[l][i];
 
-                let likelihood_below_left = Some(node.message_up(left_parent.joint_above.len(), &right_parent.joint_above));
-                let likelihood_below_right = Some(node.message_up(right_parent.joint_above.len(), &left_parent.joint_above));
+                let likelihood_below_left = Some(node.message_up(left_parent.joint_above[0].len(), &right_parent.joint_above));
+                let likelihood_below_right = Some(node.message_up(right_parent.joint_above[0].len(), &left_parent.joint_above));
 
                 self.all_layers[l-1][2*i].likelihood_below = likelihood_below_left;
                 self.all_layers[l-1][2*i+1].likelihood_below = likelihood_below_right;
             }
         }
 
-        self.protein_layer = self.all_layers[0].clone();
+        self.variable_layer = self.all_layers[0].clone();
     }
 
     /// Retrieves the message to a variable node (protein).
@@ -167,8 +187,10 @@ impl ConvolutionTree {
     /// 
     /// # Returns
     /// A probability vector representing the message to that protein.
-    pub fn message_to_variable(&self, prot_idx: usize) -> Vec<f64> {
-        self.protein_layer[prot_idx].messages_up()
+    pub fn message_to_variable(&self, var_idx: usize) -> Vec<f64> {
+        let mut message = self.variable_layer[var_idx].messages_up().iter().map(|l| l[1]).collect();
+        normalize(&mut message);
+        message
     }
 
     /// Retrieves the message to the shared likelihood node.
@@ -176,9 +198,11 @@ impl ConvolutionTree {
     /// # Returns
     /// A probability vector representing the message to the shared likelihood.
     pub fn message_to_shared_likelihood(&self) -> Result<Vec<f64>, Box<dyn std::error::Error>>{
-
         // Extract the required range
-        Ok(self.all_layers.last().ok_or("last() called on an empty vector")?[0].joint_above[..=self.n_proteins].to_vec())
+        let root = &self.all_layers.last().ok_or("last() called on an empty vector")?[0];
+        let variable_joints = root.joint_above.iter().map(|joint| joint[..self.n_variables].to_vec());
+        let shared_likelihood = variable_joints.flatten().collect();
+        Ok(shared_likelihood)
     }
 }
 

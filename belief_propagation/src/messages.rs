@@ -11,10 +11,10 @@ use crate::array_utils::sum_logs_batched;
 /// Represents belief values stored in different node types of the factor graph.
 #[derive(Debug, Clone)]
 pub enum NodeBelief {
-    /// Belief for variable nodes: two probabilities (inactive, active).
-    VariableBelief([f64; 2]),
+    /// Belief for variable nodes.
+    VariableBelief(Vec<f64>),
     /// Belief for factor nodes: list of probability pairs.
-    FactorBelief(Vec<[f64;2]>),
+    FactorBelief(Vec<f64>),
     /// Belief placeholder for convolution tree nodes.
     ConvolutionTreeBelief
 }
@@ -29,7 +29,7 @@ pub enum NodeBelief {
 /// The corresponding `NodeBelief`.
 pub fn get_initial_belief(node: &Node) -> NodeBelief {
     match node.get_subtype() {
-        NodeType::VariableNode { initial_belief, .. } => NodeBelief::VariableBelief(*initial_belief),
+        NodeType::VariableNode { initial_belief, .. } => NodeBelief::VariableBelief(initial_belief.clone()),
         NodeType::FactorNode { initial_belief, .. } => NodeBelief::FactorBelief(initial_belief.clone()),
         NodeType::ConvolutionTreeNode { .. } => NodeBelief::ConvolutionTreeBelief
     }
@@ -38,88 +38,73 @@ pub fn get_initial_belief(node: &Node) -> NodeBelief {
 
 impl NodeBelief {
 
-    /// Returns all stored belief values as a flat vector.
-    ///
-    /// # Returns
-    /// Vector of belief values.
-    pub fn values(&self) -> Vec<f64> {
-        match self {
-            NodeBelief::VariableBelief([a, b]) => vec![*a, *b],
-            NodeBelief::FactorBelief(vec) => vec.iter().flat_map(|arr| arr.to_vec()).collect(),
-            NodeBelief::ConvolutionTreeBelief => vec![1.0;4],
-        }
-    }
-
     /// Returns the belief values as a fixed-size array `[f64; 2]` for variable nodes (peptide or taxon).
     ///
     /// # Returns
     /// * `Some([f64; 2])` if the node is a peptide or taxon node.
     /// * `None` if the node is a factor or convolution tree node.
-    pub fn variable_values(&self) -> Option<[f64; 2]> {
+    pub fn variable_values(&self) -> Option<&Vec<f64>> {
         match self {
-            NodeBelief::VariableBelief(belief) => Some(*belief),
+            NodeBelief::VariableBelief(belief) => Some(belief),
             _ => None
         }
     }
 
-    /// Returns factor values if this is a factor belief.
-    ///
-    /// # Returns
-    /// `Some(Vec<[f64; 2]>)` if factor, otherwise `None`.
-    pub fn factor_values(&self) -> Option<&Vec<[f64; 2]>> {
+    pub fn factor_mul_vec(&self, vec: &[f64], msg_len: usize) -> Option<Vec<f64>> {
         match self {
-            NodeBelief::FactorBelief(vec) => Some(vec),
+            NodeBelief::FactorBelief(beliefs) => {
+                let belief_count = beliefs.len() / msg_len;
+                let mut result = Vec::with_capacity(belief_count);
+                for i in 0..belief_count {
+                    let start = i * msg_len;
+                    let belief = beliefs[start..(start+msg_len)].iter().zip(vec.iter()).map(|(b, v)| b * v).sum();
+                    result.push(belief);
+                }
+                Some(result)
+            }
             _ => None
         }
     }
+
 }
 
 
 #[derive(Clone, Debug)]
 pub enum MessagesInNode {
     MessagesInVariable {
-        messages: Vec<[f64; 2]>,
+        messages: Vec<f64>,
     },
     MessagesInFactor {
         ct_message: Option<Vec<f64>>,
-        variable_messages: Vec<[f64; 2]>,
+        variable_messages: Vec<f64>,
     },
     MessagesInCTree {
         factor_message: Vec<f64>,
-        variable_messages: Vec<[f64; 2]>,
+        variable_messages: Vec<f64>,
     },
 }
 
 impl MessagesInNode {
-    
-    /// Returns all variable messages stored in the node.
-    ///
-    /// # Returns
-    /// Reference to a vector of `[f64; 2]` messages.
-    pub fn get_messages(&self) -> &Vec<[f64;2]> {
-        match self {
-            MessagesInNode::MessagesInVariable { messages } => messages,
-            MessagesInNode::MessagesInFactor { variable_messages, .. } => variable_messages,
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages,
-        }
-    }
 
     /// Sets the message for a specific neighbor.
     ///
     /// # Arguments
     /// * `neighbor_index` - Index of the neighbor.
     /// * `message` - New message to store.
-    pub fn set_message(&mut self, neighbor_index: usize, message: [f64; 2]) {
+    pub fn set_message(&mut self, neighbor_index: usize, message: &[f64]) {
+        let message_length = message.len();
+        let start = neighbor_index * message_length;
+
         match self {
-            MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index] = message,
+            MessagesInNode::MessagesInVariable { messages } => { messages[start..(start+message_length)].copy_from_slice(message)},
             MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
                 if ct_message.is_none() {
-                    variable_messages[neighbor_index] = message;
+                    variable_messages[start..(start+message_length)].copy_from_slice(message);
                 } else {
-                    variable_messages[neighbor_index-1] = message;
+                    variable_messages[(start-message_length)..start].copy_from_slice(message);
                 }
             }
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages[neighbor_index-1] = message,
+            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages[(start-message_length)..start].copy_from_slice(message),
         }
     }
 
@@ -130,26 +115,34 @@ impl MessagesInNode {
     ///
     /// # Returns
     /// Message as `[f64; 2]`.
-    pub fn get_message(&self, neighbor_index: usize) -> [f64;2] {
+    pub fn get_message(&self, neighbor_index: usize, message_length: usize) -> &[f64] {
+        let start = neighbor_index * message_length;
         match self {
-            MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index],
+            MessagesInNode::MessagesInVariable { messages } => &messages[start..(start+message_length)],
             MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
                 if ct_message.is_none() {
-                    return variable_messages[neighbor_index];
+                    return &variable_messages[start..(start+message_length)];
                 } else {
-                    return variable_messages[neighbor_index - 1];
+                    return &variable_messages[(start-message_length)..start];
                 }
             },
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages[neighbor_index - 1],
+            MessagesInNode::MessagesInCTree { variable_messages, .. } => &variable_messages[(start-message_length)..start],
         }
     }
 
-    /// Returns the number of messages stored in the node.
-    ///
-    /// # Returns
-    /// Message count as `usize`.
-    pub fn get_message_count(&self) -> usize {
-        self.get_messages().len()
+    pub fn get_message_count(&self, msg_len: usize) -> usize {
+        match self {
+            MessagesInNode::MessagesInVariable { messages } => messages.len() / msg_len,
+            MessagesInNode::MessagesInFactor { variable_messages, .. } => variable_messages.len() / msg_len,
+            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages.len() / msg_len,
+        }
+    }
+
+    pub fn variable_messages(&self) -> &Vec<f64> {
+        match self {
+            MessagesInNode::MessagesInVariable { messages } => messages,
+            MessagesInNode::MessagesInFactor { variable_messages, .. } | MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages,
+        }
     }
 
     /// Checks whether a message at a given index is a convolution tree message.
@@ -207,6 +200,13 @@ impl MessagesInNode {
             _ => Err("set_ct_message is only valid on MessageInCTree and MessagesInFactor".into())
         }
     }
+
+    pub fn sum_logs_variables(&self, message_length: usize) -> Vec<f64> {
+        match self {
+            MessagesInNode::MessagesInVariable { messages } => sum_logs_batched(messages, message_length),
+            MessagesInNode::MessagesInFactor { variable_messages, .. } | MessagesInNode::MessagesInCTree { variable_messages, .. } => sum_logs_batched(variable_messages, message_length),
+        }
+    }
 }
 
 
@@ -221,7 +221,9 @@ pub struct Messages {
     // incoming messages for each node [end node][neighbour id]
     msg_in: Vec<MessagesInNode>,
     msg_in_new: Vec<MessagesInNode>,
-    msg_in_log: Vec<MessagesInNode>
+    msg_in_log: Vec<MessagesInNode>,
+
+    msg_len: usize,
 }
 
 
@@ -251,41 +253,50 @@ impl Messages {
             current_beliefs.push(get_initial_belief(node));
         }
 
+        let mut i = 0;
+        let mut msg_len = 0;
+        while msg_len == 0 && i < current_beliefs.len() {
+            if let Some(belief) = current_beliefs[i].variable_values() {
+                msg_len = belief.len();
+            }
+            i += 1;
+        }
+
         let mut msg_in = Vec::with_capacity(ct_graph_in.node_count());
         let mut msg_in_new = Vec::with_capacity(ct_graph_in.node_count());
         for node in ct_graph_in.get_nodes() {
 
             match node.get_subtype() {
                 NodeType::VariableNode { .. } => {
-                    msg_in.push(MessagesInNode::MessagesInVariable { messages: vec![[0.5, 0.5]; node.neighbors_count()] });
-                    msg_in_new.push(MessagesInNode::MessagesInVariable { messages: vec![[0.0, 0.0]; node.neighbors_count()]});
+                    msg_in.push(MessagesInNode::MessagesInVariable { messages: vec![0.5; node.neighbors_count() * msg_len] });
+                    msg_in_new.push(MessagesInNode::MessagesInVariable { messages: vec![0.0; node.neighbors_count() * msg_len]});
                 },
                 NodeType::FactorNode { .. } => {
                     let ct_message_length = ct_graph_in.get_edge(node.get_incident_edge(0)).get_message_length();
-                    let mut variable_messages = vec![[0.5, 0.5]; node.neighbors_count()];
-                    let mut variable_messages_new = vec![[0.0, 0.0]; node.neighbors_count()];
+                    let mut variable_messages = vec![0.5; node.neighbors_count() * msg_len];
+                    let mut variable_messages_new = vec![0.0; node.neighbors_count() * msg_len];
                     let mut ct_message = None;
                     let mut ct_message_new = None;
 
                     if let Some(message_length) = ct_message_length {
-                        variable_messages = vec![[0.5, 0.5]; node.neighbors_count() - 1];
-                        variable_messages_new = vec![[0.0, 0.0]; node.neighbors_count() - 1];
-                        ct_message = Some(vec![1.0; message_length]);
-                        ct_message_new = Some(vec![1.0; message_length]);
+                        variable_messages = vec![0.5; (node.neighbors_count() - 1) * msg_len];
+                        variable_messages_new = vec![0.0; (node.neighbors_count() - 1) * msg_len];
+                        ct_message = Some(vec![1.0; message_length * msg_len]);
+                        ct_message_new = Some(vec![1.0; message_length * msg_len]);
                     }
 
                     msg_in.push(MessagesInNode::MessagesInFactor { variable_messages, ct_message });
                     msg_in_new.push(MessagesInNode::MessagesInFactor { variable_messages: variable_messages_new, ct_message: ct_message_new });
                 },
                 NodeType::ConvolutionTreeNode { .. } => {
-                    let variable_messages = vec![[0.5, 0.5]; node.neighbors_count() - 1];
-                    let variable_messages_new = vec![[0.0, 0.0]; node.neighbors_count() - 1];
+                    let variable_messages = vec![0.5; (node.neighbors_count() - 1) * msg_len];
+                    let variable_messages_new = vec![0.0; (node.neighbors_count() - 1) * msg_len];
 
                     let factor_message_length = ct_graph_in.get_edge(node.get_incident_edge(0))
                         .get_message_length().expect("First incident edge should be the edge to Factor Node");
 
-                    let factor_message = vec![1.0; factor_message_length];
-                    let factor_message_new = vec![1.0; factor_message_length];
+                    let factor_message = vec![1.0; factor_message_length * msg_len];
+                    let factor_message_new = vec![1.0; factor_message_length * msg_len];
 
                     msg_in.push(MessagesInNode::MessagesInCTree { variable_messages: variable_messages, factor_message: factor_message });
                     msg_in_new.push(MessagesInNode::MessagesInCTree { variable_messages: variable_messages_new, factor_message: factor_message_new });
@@ -295,7 +306,7 @@ impl Messages {
 
         let msg_in_log = msg_in.clone();
 
-        Messages { graph: ct_graph_in, priorities, total_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log }
+        Messages { graph: ct_graph_in, priorities, total_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log, msg_len }
 
     }
 
@@ -329,11 +340,9 @@ impl Messages {
     pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f64) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>> {
 
         let mut max_residual: f64 = f64::MAX;
-
         // first, do 5 loops where I update all messages
         for _ in 0..5 {
             self.compute_update()?;
-
             let temp = mem::replace(&mut self.msg_in_log, mem::take(&mut self.msg_in));
             self.msg_in = mem::take(&mut self.msg_in_new);
             self.msg_in_new = temp;
@@ -385,7 +394,7 @@ impl Messages {
                     if self.msg_in[end_id].is_ct_message(start_in_end_id) {
                         self.msg_in[end_id].set_ct_message(self.msg_in_new[end_id].get_ct_message()?.clone())?;
                     } else {
-                        self.msg_in[end_id].set_message(start_in_end_id, self.msg_in_new[end_id].get_message(start_in_end_id));
+                        self.msg_in[end_id].set_message(start_in_end_id, self.msg_in_new[end_id].get_message(start_in_end_id, self.msg_len));
                     }
                     prev_changed.push(end_id);
                 }
@@ -400,15 +409,14 @@ impl Messages {
         // marginalize once the model has converged
         for node in self.graph.get_nodes() {
             if node.is_output_node() {
-                let incoming_messages: &Vec<[f64; 2]> = self.msg_in[node.get_id()].get_messages();
+                let incoming_sum_logs: Vec<f64> = self.msg_in[node.get_id()].sum_logs_variables(self.msg_len);
                     
-                let initial_belief: [f64; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
-
-                let sum_logs: [f64;2] = incoming_messages.iter()
-                    .fold([0.0;2], |mut acc,  row| {acc[0] += row[0].ln(); acc[1] += row[1].ln(); acc});
+                let initial_belief = get_initial_belief(node);
+                let initial_belief: &Vec<f64> = initial_belief.variable_values().ok_or("Node should have variable belief")?;
 
                 // Compute final log-normalized message
-                let mut logged_variable_marginal: [f64; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
+                let mut logged_variable_marginal: Vec<f64> = incoming_sum_logs.iter().zip(initial_belief.iter())
+                    .map(|(s, b)| s + b.ln()).collect();
                 log_normalize(&mut logged_variable_marginal);
 
                 self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
@@ -419,7 +427,7 @@ impl Messages {
             .filter(|n| n.is_output_node())
             .map(|n| {
                 let name = n.get_name()?.to_string();
-                let values = self.current_beliefs[n.get_id()].values();
+                let values = self.current_beliefs[n.get_id()].variable_values().expect("variable_values called on non-variable node").clone();
                 Ok((name, values))
             })
             .collect();
@@ -460,15 +468,15 @@ impl Messages {
         match start_node.get_subtype() {
             NodeType::VariableNode { .. } => {
                 let new_message = self.compute_out_message_variable(start_id, end_id, end_in_start_id);
-                self.msg_in_new[end_id].set_message(start_in_end_id, new_message);
+                self.msg_in_new[end_id].set_message(start_in_end_id, &new_message);
             },
             NodeType::FactorNode { .. } => {
                 if self.graph.get_node(end_id).is_convolution_tree_node() {
                     let new_message = self.compute_out_message_factor_ctree(start_id, end_id, end_in_start_id)?;
                     self.msg_in_new[end_id].set_ct_message(new_message)?;
                 } else {
-                    let new_message = self.compute_out_message_factor(start_id, end_id, end_in_start_id, start_in_end_id)?;
-                    self.msg_in_new[end_id].set_message(start_in_end_id, new_message);
+                    let new_message: Vec<f64> = self.compute_out_message_factor(start_id, end_id, end_in_start_id, start_in_end_id)?;
+                    self.msg_in_new[end_id].set_message(start_in_end_id, &new_message);
                 }
             },
             NodeType::ConvolutionTreeNode { .. } => 
@@ -492,27 +500,28 @@ impl Messages {
     /// 
     /// # Returns
     /// Normalized probability array.
-    fn compute_out_message_variable(&mut self, start_id: usize, _end_id: usize, end_in_start_id: usize) -> [f64; 2] {
+    fn compute_out_message_variable(&mut self, start_id: usize, _end_id: usize, end_in_start_id: usize) -> Vec<f64> {
         // Message to compute: Protein -> factor/convolution node, or peptide -> factor node
         
-        let node_belief: [f64; 2] = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a TaxonBelief or PeptideBelief");
+        let node_belief: &Vec<f64> = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a TaxonBelief or PeptideBelief");
 
-        if self.msg_in[start_id].get_message_count() <= 1 {
-            return node_belief;
+        if self.msg_in[start_id].get_message_count(self.msg_len) <= 1 {
+            return node_belief.clone();
         }
 
         // Sum of incoming messages, need for logs to prevent underflow in very large multiplications
-        let incoming_messages: &Vec<[f64; 2]> = self.msg_in[start_id].get_messages();
-        let mut out_message_log: [f64; 2] = sum_logs_batched(incoming_messages);
+        let mut out_message_log: Vec<f64> = self.msg_in[start_id].sum_logs_variables(self.msg_len);
+
         // Take message coming from end node out of the result.
-        let msg_from_end = incoming_messages[end_in_start_id];
-        out_message_log[0] -= ln_from_table(msg_from_end[0]);
-        out_message_log[1] -= ln_from_table(msg_from_end[1]);
+        let msg_from_end = self.msg_in[start_id].get_message(end_in_start_id, self.msg_len);
+        for (b, b_end) in out_message_log.iter_mut().zip(msg_from_end.iter()) {
+            *b -= ln_from_table(*b_end);
+        }
 
         log_normalize(&mut out_message_log);
 
         // Prevent underflow: Replace zeros with 1e-30
-        avoid_underflow_arr(&mut out_message_log);
+        avoid_underflow(&mut out_message_log);
 
         out_message_log
     }
@@ -526,25 +535,23 @@ impl Messages {
     /// 
     /// # Returns
     /// Normalized probability vector.
-    fn compute_out_message_factor(&mut self, start_id: usize, end_id: usize, end_in_start_id: usize, start_in_end_id: usize) -> Result<[f64; 2], Box<dyn std::error::Error>> {
-        let incoming_messages: &MessagesInNode = &self.msg_in[start_id];
-        let node_belief: &Vec<[f64;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
-        
+    fn compute_out_message_factor(&mut self, start_id: usize, end_id: usize, end_in_start_id: usize, start_in_end_id: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {    
         let end_node = self.graph.get_node(end_id);
         if let NodeType::VariableNode { output: false, .. } = end_node.get_subtype() {
             // Factor -> input variable message: this messages is never used,.
-            return Ok(self.msg_in[end_id].get_message(start_in_end_id));
+            return Ok(self.msg_in[end_id].get_message(start_in_end_id, self.msg_len).to_vec());
         }
 
         // Factor -> Output variable node
-        // incoming_messages is always a 2x2, we must ignore row end_in_start_id, so product is just the other row
-        let prod: [f64; 2] = incoming_messages.get_message(1-end_in_start_id);
-        
+        let incoming_message = self.msg_in[start_id].get_message(1-end_in_start_id, self.msg_len);
+
         // Compute final normalized message
-        let mut out_message: Vec<f64> = node_belief.iter().map(|&a| a[0] * prod[0] + a[1] * prod[1]).collect();
+        let out_message: Vec<f64> = self.current_beliefs[start_id].factor_mul_vec(incoming_message, self.msg_len).expect("factor belief multiplication on a non-factor node.");
+        // Get the chance to be active for each feature
+        let mut out_message: Vec<f64> = out_message.iter().skip(1).step_by(2).cloned().collect();
         normalize(&mut out_message);
 
-        return Ok([out_message[0], out_message[1]]);
+        Ok(out_message)
     }
 
     /// Computes outgoing message for factor nodes, for edges going to a ct tree node.
@@ -557,12 +564,14 @@ impl Messages {
     /// # Returns
     /// Normalized probability vector.
     fn compute_out_message_factor_ctree(&mut self, start_id: usize, _end_id: usize, _end_in_start_id: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
-        let incoming_message: &[f64; 2] = &self.msg_in[start_id].get_message(1);
-        let node_belief: &Vec<[f64;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
+        let incoming_message = self.msg_in[start_id].get_message(1, self.msg_len);
         
         // Compute final normalized message
-        let mut out_message: Vec<f64> = node_belief.iter().map(|&a| a[0] * incoming_message[0] + a[1] * incoming_message[1]).collect();
-        normalize(&mut out_message);
+        let mut out_message: Vec<f64> = self.current_beliefs[start_id].factor_mul_vec(incoming_message, self.msg_len).expect("factor belief multiplication on a non-factor node.");
+        let counts = out_message.len() / self.msg_len;
+        for i in 0..self.msg_len {
+            normalize_slice(&mut out_message, i * counts, (i+1) * counts);
+        }
         
         return Ok(out_message);
     }
@@ -579,22 +588,34 @@ impl Messages {
         let (factor_id, _) = self.graph.get_neighbor_node_and_neighbor_id(start_node, 0);
         
         let shared_likelihoods: &Vec<f64> = self.msg_in[start_id].get_ct_message()?;
-        let old_shared_likelihoods: &Vec<f64> = self.msg_in_log[start_id].get_ct_message()?;
+        // let old_shared_likelihoods: &Vec<f64> = self.msg_in_log[start_id].get_ct_message()?;
 
-        let prot_prob_list: &Vec<[f64; 2]> = self.msg_in[start_id].get_messages();
+        let prot_prob_list: &Vec<f64> = self.msg_in[start_id].variable_messages();
+        // let old_prot_prob_list: &Vec<f64> = self.msg_in_log[start_id].variable_messages();
 
-        let old_prot_prob_list: &Vec<[f64; 2]> = self.msg_in_log[start_id].get_messages();
+        let convolution_tree = ConvolutionTree::new(shared_likelihoods, prot_prob_list, self.msg_len)?;
 
-        if old_shared_likelihoods != shared_likelihoods && 
-            prot_prob_list.iter().zip(old_prot_prob_list.iter()).any(|(a, b)| a[0] != b[0]) {
-            let convolution_tree = ConvolutionTree::new(shared_likelihoods.clone(), prot_prob_list.clone())?;
+        for (protein_id, protein) in prot_list.iter().enumerate() {
+            let (_, node_neighbor_index): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, protein_id+1);
+            let mut new_message = convolution_tree.message_to_variable(protein_id);
+            avoid_underflow(&mut new_message);
+            self.msg_in_new[*protein].set_message(node_neighbor_index, &new_message);
+        }
+
+        let mut new_message = convolution_tree.message_to_shared_likelihood()?;
+
+        avoid_underflow(&mut new_message);
+        self.msg_in_new[factor_id].set_ct_message(new_message)?;
+
+        /*if old_shared_likelihoods != shared_likelihoods && prot_prob_list != old_prot_prob_list {
+            println!("compute");
+            let convolution_tree = ConvolutionTree::new(shared_likelihoods, prot_prob_list, self.msg_len)?;
 
             for (protein_id, protein) in prot_list.iter().enumerate() {
                 let (_, node_neighbor_index): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, protein_id+1);
-                let new_message = convolution_tree.message_to_variable(protein_id);
-                let mut new_message = [new_message[0], new_message[1]];
-                avoid_underflow_arr(&mut new_message);
-                self.msg_in_new[*protein].set_message(node_neighbor_index, new_message);
+                let mut new_message = convolution_tree.message_to_variable(protein_id);
+                avoid_underflow(&mut new_message);
+                self.msg_in_new[*protein].set_message(node_neighbor_index, &new_message);
             }
 
             let mut new_message = convolution_tree.message_to_shared_likelihood()?;
@@ -603,15 +624,17 @@ impl Messages {
             self.msg_in_new[factor_id].set_ct_message(new_message)?;
 
         } else {
+
+            println!("not");
             
             for (protein_id, &protein) in prot_list.iter().enumerate() {
                 let (_, node_neighbor_index): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, protein_id+1);
-                self.msg_in_new[protein].set_message(node_neighbor_index, self.msg_in[protein].get_message(node_neighbor_index).clone());
+                self.msg_in_new[protein].set_message(node_neighbor_index, self.msg_in[protein].get_message(node_neighbor_index, self.msg_len).clone());
             }
 
             let new_message = self.msg_in[factor_id].get_ct_message()?.clone();
             self.msg_in_new[factor_id].set_ct_message(new_message)?;
-        }
+        }*/
 
         Ok(())
     }
@@ -638,8 +661,8 @@ impl Messages {
             return residual;
         }
 
-        let msg1: &mut [f64; 2] = &mut self.msg_in[end_id].get_message(start_in_end_id);
-        let msg2: &[f64; 2] = &self.msg_in_log[end_id].get_message(start_in_end_id);
+        let msg1: Vec<f64> = self.msg_in[end_id].get_message(start_in_end_id, self.msg_len).to_vec();
+        let msg2: &[f64] = self.msg_in_log[end_id].get_message(start_in_end_id, self.msg_len);
 
         (msg1[0] / msg2[0]).max(msg1[1] / msg2[1]).ln().abs()
     }
@@ -676,17 +699,16 @@ impl Messages {
     /// * `end_id` - ID of destination node.
     /// * `end_in_start_id` - Neighbor index of destination in source.
     fn compute_priority(&mut self, start_id: usize, end_id: usize, start_in_end_id: usize) -> Result<(), Box<dyn std::error::Error>> {
-        let end_node = self.graph.get_node(end_id);
-
+        let end_node: &Node = self.graph.get_node(end_id);
+        let end_neighbor_ids = self.graph.get_neighbors_ids(end_node);
         self.priorities.remove(&(end_id as u32, start_in_end_id as u32));
 
         for i in 0..end_node.neighbors_count() {
             let (neighbor_id, end_in_neighbor_id) = self.graph.get_neighbor_node_and_neighbor_id(&end_node, i);
             if neighbor_id != start_id {
-                let priority: f64 = self.graph
-                    .get_neighbors(end_node)
+                let priority: f64 = end_neighbor_ids.iter()
                     .enumerate()
-                    .map(|(j, sum_run)| {
+                    .map(|(j, &sum_run)| {
                         if sum_run != neighbor_id { 
                             self.total_residuals[end_id][j][i]
                         } else { 
