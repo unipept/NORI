@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use minidom::Element;
 use serde::Serialize;
+use std::fmt::Write;
 
 
 /// Defines the type of node in the factor graph with its initial beliefs.
 #[derive(Debug, Serialize, Clone)]
 pub enum NodeType {
     /// Variable node with prior probabilities.
-    VariableNode { output: bool, name: String, initial_belief: Vec<f64> },
+    VariableNode { output: bool, name: String, initial_belief: [f64; 2] },
     /// Factor node with CPD.
-    FactorNode { initial_belief: Vec<f64> },
+    FactorNode { initial_belief: Vec<[f64; 2]> },
     /// Convolution tree node.
     ConvolutionTreeNode
 }
@@ -150,7 +151,7 @@ impl Node {
     /// * `prior` - Probability to assign as active.
     pub fn fill_in_prior(&mut self, prior: f64) {
         if let NodeType::VariableNode { output: true , name, .. } = &self.subtype {
-            self.subtype = NodeType::VariableNode { output: true, name: name.to_string(), initial_belief: vec![1.0 - prior, prior] };
+            self.subtype = NodeType::VariableNode { output: true, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
         }
     }
 
@@ -163,43 +164,34 @@ impl Node {
     pub fn fill_in_factor(&mut self, alpha: f64, beta: f64, regularized: bool) {
         if self.is_factor_node() {
             let degree: usize = self.neighbors_count();
+
+            let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree);
+            let mut cpd_array_regularized = Vec::with_capacity(degree);
+            let exponent_array: Vec<usize> = (0..degree).collect();
             let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..degree).map(|x| x as f64).collect();
-
-            // regularize cpd priors to penalize higher number of parents
-            // log domain to avoid underflow
-            let mut cpd_array_2: Vec<f64> = Vec::with_capacity(2*degree);
-            let mut cpd_sum: f64 = 0.0;
-            for i in (0..degree).rev() {
-                let cpd_0 = (1.0 - alpha).powi(i as i32) * (1.0 - beta);
-                let mut cpd_1 = 1.0 - cpd_0;
-                if regularized { cpd_1 /= divide_array[i] }
-                cpd_sum += cpd_0 + cpd_1;
-                cpd_array_2.push(cpd_0);
-                cpd_array_2.push(cpd_1);
-            }
-
-            // Normalize arrays (assuming normalize and avoid_underflow are implemented)
-            Self::normalize_cpd(&mut cpd_array_2, cpd_sum, true);
-            let mut cpd_array: Vec<f64> = Vec::with_capacity(2*degree);
+            
             // regularize cpd priors to penalize higher number of parents
             // log domain to avoid underflow
             let mut cpd_sum: f64 = 0.0;
-            for i in 0..degree {
-                let cpd_0 = (1.0 - alpha).powi(i as i32) * (1.0 - beta);
-                let mut cpd_1 = 1.0 - cpd_0;
-                if regularized { cpd_1 /= divide_array[i] }
+            let mut cpd_regularized_sum: f64 = 0.0;
+            for (i, exp) in exponent_array.iter().enumerate() {
+                let cpd_0 = (1.0 - alpha).powi(*exp as i32) * (1.0 - beta);
+                let cpd_1 = 1.0 - cpd_0;
                 cpd_sum += cpd_0 + cpd_1;
-                cpd_array.push(cpd_0);
-                cpd_array.push(cpd_1);
+                cpd_array.push([cpd_0, cpd_1]);
+
+                let cpd_regularized_0 = (cpd_0.powi(*exp as i32) * (1.0 - beta)) / divide_array[i];
+                let cpd_regularized_1 = 1.0 - cpd_regularized_0;
+                cpd_regularized_sum += cpd_regularized_0 + cpd_regularized_1;
+                cpd_array_regularized.push([cpd_regularized_0, cpd_regularized_1]);
             }
 
             // Normalize arrays (assuming normalize and avoid_underflow are implemented)
-            Self::normalize_cpd(&mut cpd_array, cpd_sum, true);
+            Self::normalize_cpd(&mut cpd_array, cpd_sum, false);
+            Self::normalize_cpd(&mut cpd_array_regularized, cpd_regularized_sum, true);
             
             // Create factor
-            let initial_belief = cpd_array_2.iter().chain(cpd_array.iter()).map(|v|*v).collect();
-
-            // println!("{:?}", initial_belief);
+            let initial_belief = if regularized { cpd_array_regularized } else { cpd_array };
             
             // Add factor to the node's attributes
             self.subtype = NodeType::FactorNode { initial_belief };
@@ -212,13 +204,17 @@ impl Node {
     /// * `arr` - CPD array.
     /// * `sum` - Normalization constant.
     /// * `avoid_underflow` - If true, enforce minimum values.
-    fn normalize_cpd(arr: &mut Vec<f64>, sum: f64, avoid_underflow: bool) {
+    fn normalize_cpd(arr: &mut Vec<[f64; 2]>, sum: f64, avoid_underflow: bool) {
         for cpd in arr.iter_mut() {
-            *cpd /= sum;
+            cpd[0] /= sum;
+            cpd[1] /= sum;
     
             if avoid_underflow {
-                if *cpd < 1e-30 {
-                    *cpd = 1e-30;
+                if cpd[0] < 1e-30 {
+                    cpd[0] = 1e-30;
+                }
+                if cpd[1] < 1e-30 {
+                    cpd[1] = 1e-30;
                 }
             }
         }
@@ -261,15 +257,17 @@ impl Node {
             Some("input") => {
                 let belief_str = current_node_data.get("belief").ok_or("belief not found while parsing input node")?;
 
-                let belief: Vec<f64> = belief_str
+                let beliefs: Vec<f64> = belief_str
                     .trim_matches(|c| c == '[' || c == ']').trim()
                     .split(',').map(|s| s.trim().parse::<f64>())
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let belief: [f64; 2] = [beliefs[0], beliefs[1]];
+
                 NodeType::VariableNode { output: false, name: name.clone(), initial_belief: belief }
             },
             Some("output") => {
-                NodeType::VariableNode { output: true, name: name.clone(), initial_belief: vec![0.0, 0.0] }
+                NodeType::VariableNode { output: true, name: name.clone(), initial_belief: [0.0, 0.0] }
             },
             _ => {
                 return Err("Node data has unknown type".into());

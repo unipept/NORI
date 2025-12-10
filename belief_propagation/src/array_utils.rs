@@ -32,44 +32,36 @@ pub fn ln_from_table(x: f64) -> f64 {
 ///
 /// # Returns
 /// * `[f64; 2]` where each component is the batched sum of logarithms across the corresponding column.
-pub fn sum_logs_batched(beliefs: &Vec<f64>, belief_length: usize) -> Vec<f64> {
+pub fn sum_logs_batched(rows: &Vec<[f64; 2]>) -> [f64; 2] {
 
-    let mut accs = vec![0.0; belief_length];
+    let mut acc0 = 0.0f64;
+    let mut acc1 = 0.0f64;
 
-    let block_size = 6;
-    let blocks = beliefs.len() / (block_size * belief_length);
+    let block_size = 10;
+    let blocks = rows.len() / block_size;
 
-    for block_id in 0..blocks {
-        let block_start = block_id * belief_length * block_size;
-        let mut prods: Vec<f64> = vec![1.0; belief_length];
-
-        for row_id in 0..block_size {
-            let row_start = block_start + row_id * belief_length;
-
-            for i in 0..belief_length {
-                prods[i] *= beliefs[row_start + i];
-            }
+    for i in 0..blocks {
+        let start = i * block_size;
+        let mut prod0 = 1.0f64;
+        let mut prod1 = 1.0f64;
+        for &row in &rows[start..(start+block_size)] {
+            prod0 *= row[0];
+            prod1 *= row[1];
         }
 
-        for i in 0..belief_length {
-            accs[i] += ln_from_table(prods[i]);
-        }
+        acc0 += ln_from_table(prod0);
+        acc1 += ln_from_table(prod1);
     }
 
-    let mut rem_start = blocks * block_size * belief_length;
-    let mut prods = vec![1.0; belief_length];
-    while rem_start < beliefs.len() {
-        for i in 0..belief_length {
-            prods[i] *= beliefs[rem_start + i];
-        }
-        rem_start += belief_length;
+    let rem_start = blocks * block_size;
+    let mut prod0 = 1.0;
+    let mut prod1 = 1.0;
+    for &row in &rows[rem_start..] {
+        prod0 *= row[0];
+        prod1 *= row[1];
     }
 
-    for i in 0..belief_length {
-        accs[i] += ln_from_table(prods[i]);
-    }
-
-    accs
+    [acc0 + prod0.ln(), acc1 + prod1.ln()]
 }
 
 
@@ -80,13 +72,8 @@ pub fn sum_logs_batched(beliefs: &Vec<f64>, belief_length: usize) -> Vec<f64> {
 /// # Arguments
 /// * `array` - A mutable reference to a vector of `f64` values.
 pub fn normalize(array: &mut Vec<f64>) {
-    normalize_slice(array, 0, array.len());
-}
-
-
-pub fn normalize_slice(array: &mut Vec<f64>, start: usize, end: usize) {
-    let sum: f64 = array[start..end].iter().sum();
-    for val in array[start..end].iter_mut() {
+    let sum: f64 = array.iter().sum();
+    for val in array.iter_mut() {
         *val /= sum;
     }
 }
@@ -101,18 +88,11 @@ pub fn normalize_slice(array: &mut Vec<f64>, start: usize, end: usize) {
 /// 
 /// # Notes
 /// - Subtracts `max(x)` to prevent overflow.
-pub fn log_normalize(array: &mut Vec<f64>) {
-    let max_val = array.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-    let log_sum_exp = array
-        .iter()
-        .map(|&x| (x - max_val).exp())
-        .sum::<f64>()
-        .ln();
-
-    for x in array.iter_mut() {
-        *x = ( *x - max_val - log_sum_exp ).exp();
-    }
+pub fn log_normalize(array: &mut [f64; 2]) {
+    let max_val = array[0].max(array[1]);
+    let log_sum_exp = ((array[0] - max_val).exp() + (array[1] - max_val).exp()).ln();
+    array[0] = (array[0] - max_val - log_sum_exp).exp();
+    array[1] = (array[1] - max_val - log_sum_exp).exp();
 }
 
 
@@ -123,9 +103,21 @@ pub fn log_normalize(array: &mut Vec<f64>) {
 /// # Arguments
 /// * `array` - A mutable reference to a vector of `f64` values.
 pub fn avoid_underflow(array: &mut Vec<f64>) {
-    array.iter_mut().for_each(|x| if *x < 1e-10 { *x = 1e-10 });
+    array.iter_mut().for_each(|x| if *x < 1e-30 { *x = 1e-30 });
 }
 
+
+/// Prevents numerical underflow in a fixed-size `[f64; 2]` array by setting a minimum threshold.
+///
+/// # Arguments
+/// * `array` - Mutable reference to a `[f64; 2]` array.
+pub fn avoid_underflow_arr(array: &mut [f64; 2]) {
+    for i in 0..2 {
+        if array[i] < 1e-30 {
+            array[i] = 1e-30;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
