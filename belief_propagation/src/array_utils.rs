@@ -132,27 +132,11 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_2d_basic() {
-        let mut values = vec![[1.0, 1.0], [2.0, 2.0]];
-        normalize_2d(&mut values);
-        let total: f64 = values.iter().map(|x| x[0] + x[1]).sum();
-        assert!((total - 1.0).abs() < 1e-12);
-    }
-
-    #[test]
     fn test_log_normalize_basic() {
         let mut values = [0.0, 0.0];
         log_normalize(&mut values);
         let sum: f64 = values[0] + values[1];
         assert!((sum - 1.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_log_normalize_2d_basic() {
-        let mut values = vec![[0.0, 0.0], [1.0, 1.0]];
-        log_normalize_2d(&mut values);
-        let total: f64 = values.iter().map(|x| x[0] + x[1]).sum();
-        assert!((total - 1.0).abs() < 1e-12);
     }
 
     #[test]

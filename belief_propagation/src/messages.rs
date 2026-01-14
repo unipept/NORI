@@ -708,34 +708,31 @@ impl Messages {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::{Node, NodeType, Factor};
+    use crate::node::{Node, NodeType};
     use crate::factor_graph::CTFactorGraph;
     use std::collections::HashSet;
     use crate::factor_graph::Edge;
 
-    /// Creates a minimal graph with Peptide -> Factor -> Taxon
+    /// Creates a minimal graph with input -> Factor -> output
     fn create_minimal_graph() -> CTFactorGraph {
         let mut nodes: Vec<Node> = Vec::new();
         let mut edges: Vec<Edge> = Vec::new();
 
         let variable_node_1 = Node::new(
             0,
-            "peptide1".to_string(),
-            NodeType::VariableNode { initial_belief: [0.7, 0.3] }
+            NodeType::VariableNode { name: "input_1".to_string(), initial_belief: [0.7, 0.3] , output: false }
         );
         nodes.push(variable_node_1);
 
         let factor_node_1 = Node::new(
             1,
-            "factor1".to_string(),
             NodeType::FactorNode { initial_belief: vec![[0.6, 0.4], [0.2, 0.8]] }
         );
         nodes.push(factor_node_1);
 
         let variable_node_2 = Node::new(
             2,
-            "taxon_1".to_string(),
-            NodeType::VariableNode { initial_belief: [0.5, 0.5] }
+            NodeType::VariableNode { name: "output_1".to_string(), initial_belief: [0.5, 0.5], output: true }
         );
         nodes.push(variable_node_2);
 
@@ -759,11 +756,10 @@ mod tests {
     fn test_get_initial_belief() {
         let variable_node = Node::new(
             0,
-            "variable1".to_string(),
-            NodeType::VariableNode { initial_belief: [0.6, 0.4] }
+            NodeType::VariableNode { name: "variable_1".to_string(), initial_belief: [0.6, 0.4], output: false }
         );
 
-        if let NodeType::VariableNode { initial_belief } = variable_node.get_subtype() {
+        if let NodeType::VariableNode { initial_belief, .. } = variable_node.get_subtype() {
             assert!((initial_belief[0] - 0.6).abs() < 1e-10);
             assert!((initial_belief[1] - 0.4).abs() < 1e-10);
         } else {
@@ -772,30 +768,20 @@ mod tests {
 
         let factor_node = Node::new(
             1,
-            "factor1".to_string(),
             NodeType::FactorNode { initial_belief: vec![[0.5, 0.5], [0.3, 0.7]] }
         );
 
         if let NodeType::FactorNode { initial_belief } = factor_node.get_subtype() {
-            assert_eq!(initial_belief.array.len(), 2);
-            assert!((initial_belief.array[0][0] - 0.5).abs() < 1e-10);
-            assert!((initial_belief.array[1][1] - 0.7).abs() < 1e-10);
-            assert_eq!(initial_belief.array_labels, vec!["p0".to_string(), "p1".to_string()]);
+            assert!((initial_belief[0][0] - 0.5).abs() < 1e-10);
+            assert!((initial_belief[1][1] - 0.7).abs() < 1e-10);
         } else {
             panic!("Expected FactorNode");
-        }
-
-        let ct_node = Node::new_convolution_node(3, "ct1".to_string(), 4);
-
-        if let NodeType::ConvolutionTreeNode = ct_node.get_subtype() {
-        } else {
-            panic!("Expected ConvolutionTreeNode");
         }
     }
 
     #[test]
     fn test_nodebelief_values_and_factor_values() {
-        let pb = NodeBelief::VariableNode(0.1,0.9);
+        let pb = NodeBelief::VariableBelief([0.1,0.9]);
         assert_eq!(pb.values(), vec![0.1,0.9]);
         let fb = NodeBelief::FactorBelief(vec![[0.2,0.8]]);
         assert_eq!(fb.values(), vec![0.2,0.8]);
@@ -812,9 +798,8 @@ mod tests {
         assert!(beliefs.is_ok());
         let beliefs = beliefs.unwrap();
 
-        assert_eq!(beliefs[0].len(),2);
-        assert_eq!(beliefs[2].len(),2);
-        let sum: f64 = beliefs[0].iter().sum();
+        assert_eq!(beliefs.len(),1);
+        let sum: f64 = beliefs[0].1.iter().sum();
         assert!((sum-1.0).abs()<1e-6);
     }
 

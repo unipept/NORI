@@ -1,10 +1,6 @@
 use crate::factor_graph::CTFactorGraph;
-use std::collections::HashMap;
 use crate::messages::Messages;
 use csv::Writer;
-use serde_json;
-use std::io::Cursor;
-use csv::ReaderBuilder;
 
 
 /// Calibrates multiple subgraphs (connected components) of a factor graph using loopy belief propagation.
@@ -122,68 +118,43 @@ fn generate_csv(results: Vec<(String, Vec<f64>)>) -> Result<String, Box<dyn std:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn test_generate_csv_basic() {
-        let node_names = vec!["n1".to_string(), "n2".to_string()];
-        let node_types = vec!["taxon".to_string(), "peptide".to_string()];
-        let results = vec![vec![0.3, 0.7], vec![0.6, 0.4]];
+        let results = vec![("n1".to_string(), vec![0.3, 0.7]), ("n2".to_string(), vec![0.6, 0.4])];
 
-        let csv = generate_csv(node_names, node_types, results);
+        let csv = generate_csv(results);
         assert!(csv.is_ok());
         let csv = csv.unwrap();
 
         assert!(csv.contains("n1"));
         assert!(csv.contains("0.7"));
-        assert!(csv.contains("taxon"));
-    }
-
-    #[test]
-    fn test_parse_taxon_scores_basic() {
-        let csv_content = "123,0.8,taxon\n456,0.5,taxon\n789,0.9,peptide\n".to_string();
-        let json = parse_taxon_scores(csv_content);
-        assert!(json.is_ok());
-        let json = json.unwrap();
-
-        let parsed: HashMap<usize, f64> = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.get(&456), Some(&0.5));
-        assert_eq!(parsed.get(&123), Some(&0.8));
-        assert!(parsed.get(&789).is_none());
     }
 
     #[test]
     fn test_calibrate_all_subgraphs_empty() {
         let res = calibrate_all_subgraphs(vec![], 10, 1e-6);
         assert!(res.is_ok());
-        let (names, cats, results) = res.unwrap();
+        let res = res.unwrap();
 
-        assert!(names.is_empty());
-        assert!(cats.is_empty());
-        assert!(results.is_empty());
+        assert!(res.is_empty());
     }
 
     #[test]
     fn test_run_belief_propagation_does_not_crash() {
         let minimal_graph = r#"<?xml version='1.0' encoding='utf-8'?>
         <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
-            <key id="d1" for="node" attr.name="InitialBelief_1" attr.type="double"/>
-            <key id="d0" for="node" attr.name="InitialBelief_0" attr.type="double"/>
+            <key id="type" for="node" attr.name="node_type" attr.type="string"/>
+            <key id="belief" for="node" attr.name="belief" attr.type="string"/>
             <graph edgedefault="undirected">
                 <node id="n0">
-                    <data key="d0">0.0010000000000000009</data>
-                    <data key="d1">0.999</data>
-                    <data key="d2">peptide</data>
+                    <data key="type">input</data>
+                    <data key="belief">[0.00437876, 0.99562124]</data>
                 </node>
                 <node id="n1">
-                    <data key="d2">factor</data>
-                    <data key="d3">2</data>
+                    <data key="type">output</data>
                 </node>
-                <node id="n2">
-                    <data key="d2">taxon</data>
-                </node>
-                <edge source="n0" target="n1"/>
-                <edge source="n1" target="n2"/>
+                <edge id="e1" source="n0" target="n1"/>
             </graph>
         </graphml>
         "#.to_string();
@@ -199,8 +170,7 @@ mod tests {
         );
         assert!(csv.is_ok());
         let csv = csv.unwrap();
-        println!("{}", csv);
 
-        assert!(csv.contains("n0"));
+        assert!(csv.contains("n1"));
     }
 }

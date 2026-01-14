@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use minidom::Element;
 use serde::Serialize;
-use std::fmt::Write;
 
 
 /// Defines the type of node in the factor graph with its initial beliefs.
@@ -288,34 +287,34 @@ mod tests {
         Node::new(
             id,
             NodeType::FactorNode {
-                initial_belief: vec::new(),
+                initial_belief: Vec::new(),
             },
         )
     }
 
     #[test]
     fn test_new_and_getters() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.3, 0.7] });
+        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.3, 0.7] });
         assert_eq!(node.get_id(), 1);
         assert!(!node.is_factor_node());
     }
 
     #[test]
     fn test_copy_with_id() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.0, 1.0] });
+        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.0, 1.0] });
         let copy = node.copy_with_id(42);
         assert_eq!(copy.get_id(), 42);
     }
 
     #[test]
     fn test_new_convolution_node() {
-        let node = Node::new_convolution_node(10, 3);
+        let node = Node::new_convolution_node(10);
         assert_eq!(node.get_id(), 10);
     }
 
     #[test]
     fn test_incident_edges() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.1, 0.9] });
+        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.1, 0.9] });
         node.add_incident_edge(5);
         assert_eq!(node.neighbors_count(), 1);
         assert_eq!(node.get_incident_edge(0), 5);
@@ -329,17 +328,18 @@ mod tests {
     #[test]
     fn test_set_and_get_subtype() {
         let mut node = Node::new(1, NodeType::FactorNode { initial_belief: Vec::new() });
-        node.set_subtype(NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.5, 0.5] });
+        node.set_subtype(NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.5, 0.5] });
         assert!(matches!(node.get_subtype(), NodeType::VariableNode { .. }));
     }
 
     #[test]
     fn test_fill_in_prior() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1", initial_belief: [0.0, 0.0] });
+        let mut node = Node::new(1, NodeType::VariableNode { output: true, name: "node1".to_string(), initial_belief: [0.0, 0.0] });
         node.fill_in_prior(0.8);
-        if let NodeType::VariableNode { initial_belief } = node.get_subtype() {
-            assert!((*initial_belief[0] - 0.2).abs() < 1e-9);
-            assert!((*initial_belief[1] - 0.8).abs() < 1e-9);
+        if let NodeType::VariableNode { initial_belief, .. } = node.get_subtype() {
+            println!("{:?}", initial_belief);
+            assert!((initial_belief[0] - 0.2).abs() < 1e-9);
+            assert!((initial_belief[1] - 0.8).abs() < 1e-9);
         } else {
             panic!("expected variable node");
         }
@@ -347,10 +347,11 @@ mod tests {
 
     #[test]
     fn test_fill_in_factor() {
-        let mut node = dummy_factor_node(2, 2);
+        let mut node = dummy_factor_node(2);
+        node.add_incident_edge(0);
         node.fill_in_factor(0.5, 0.1, false);
         if let NodeType::FactorNode { initial_belief, .. } = node.get_subtype() {
-            assert!(!initial_belief.array.is_empty());
+            assert!(!initial_belief.is_empty());
         } else {
             panic!("expected FactorNode");
         }
@@ -381,10 +382,9 @@ mod tests {
 
     #[test]
     fn test_parse_node_peptide() {
-        let xml: &str = r#"<node xmlns="ns" id="n1">
-            <data key="d2">peptide</data>
-            <data key="d0">0.1</data>
-            <data key="d1">0.9</data>
+        let xml: &str = r#"<node id="n0" xmlns="http://graphml.graphdrawing.org/xmlns">
+            <data key="type">input</data>
+            <data key="belief">[0.00437876, 0.99562124]</data>
         </node>"#;
         let elem: Element = xml.parse().unwrap();
         let node = Node::parse_node(&elem, 7).unwrap();

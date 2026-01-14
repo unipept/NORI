@@ -1,9 +1,7 @@
 use crate::node::{Node, NodeType};
 use minidom::Element;
-use std::collections::{HashMap, HashSet};
-use serde::{Serialize, Deserialize};
-use std::fmt::Write;
-use csv::ReaderBuilder;
+use std::collections::HashMap;
+use serde::Serialize;
 
 
 /// Represents an edge in a factor graph connecting two nodes.
@@ -60,16 +58,6 @@ impl Edge {
     /// Returns the ID of the edge.
     pub fn get_id(&self) -> usize {
         self.id as usize
-    }
-
-    /// Returns the first node ID of the edge.
-    pub fn get_node1_id(&self) -> usize {
-        self.node1_id as usize
-    }
-
-    /// Returns the second node ID of the edge.
-    pub fn get_node2_id(&self) -> usize {
-        self.node2_id as usize
     }
 
     /// Returns a tuple of the two node IDs of the edge.
@@ -329,7 +317,6 @@ impl CTFactorGraph {
     /// Adds convolution tree nodes to the graph, creating edges appropriately.
     pub fn add_ct_nodes(&mut self) {
         // When creating the CTGraph and not just reading from a previously saved graph format, use this function to add the CT nodes
-        
         let ct_node_count = self.nodes.iter().filter(|n| n.is_factor_node() && n.neighbors_count() > 2).count();
         let mut new_nodes: Vec<Node> = Vec::with_capacity(&self.nodes.len() + ct_node_count);
         new_nodes.extend_from_slice(&self.nodes);
@@ -398,51 +385,59 @@ impl CTFactorGraph {
     /// # Returns
     /// A vector of `CTFactorGraph` instances, one per connected component.
     pub fn connected_components(&self) -> Vec<Self> {
-        let mut visited: HashSet<usize> = HashSet::new();
+        let mut visited: Vec<bool> = vec![false; self.nodes.len()];
+        let mut visited_edges: Vec<bool> = vec![false; self.edges.len()];
         let mut components: Vec<Self> = Vec::new();
-
         for start_node in &self.nodes {
-            if visited.insert(start_node.get_id()) {
-                let mut component_ids: Vec<usize> = Vec::new();
+            if ! visited[start_node.get_id()] {
+                visited[start_node.get_id()] = true;
                 let mut old_to_new_nodes: HashMap<usize, usize> = HashMap::new();
 
-                let mut new_nodes: Vec<Node> = Vec::new();
+                let mut new_nodes: Vec<Node> = vec![start_node.copy_with_id(0)];
                 let mut new_edges: Vec<Edge> = Vec::new();
 
                 // Find ids of nodes to include in component
-                component_ids.push(start_node.get_id());
                 old_to_new_nodes.insert(start_node.get_id(), 0);
-                self.find_component_rec(start_node.get_id(), &mut component_ids, &mut old_to_new_nodes, &mut visited);
+                let mut stack = vec![start_node.get_id()];
+                let mut new_local_id = 1;
+                while let Some(node_id) = stack.pop() {
+                    for neighbor_id in self.get_neighbors(&self.nodes[node_id]) {
+                        if ! visited[neighbor_id] {
+                            visited[neighbor_id] = true;
+                            // assign a new index in the component
+                            old_to_new_nodes.insert(neighbor_id, new_local_id);
+                            new_nodes.push(self.nodes[neighbor_id].copy_with_id(new_local_id));
+                            new_local_id += 1;
 
-                // Create new nodes
-                for node_id in &component_ids {
-                    let node = self.nodes[*node_id].copy_with_id(old_to_new_nodes[&node_id]);
-                    new_nodes.push(node);
+                            stack.push(neighbor_id);
+                        }
+                    }
                 }
 
                 // Select edges to keep and update the node ids
                 let mut next_edge_id: usize = 0;
-                let mut component_edge_ids: HashSet<usize> = HashSet::new();
                 let mut old_to_new_edges: HashMap<usize, usize> = HashMap::new();
-                for edge in &self.edges {
+                for node in &new_nodes {
+                    for edge_id in node.get_incident_edges() {
+                        if ! visited_edges[edge_id] {
+                            visited_edges[edge_id] = true;
+                            let edge: &Edge = self.get_edge(edge_id);
+                            let ((source, source_in_target), (target, target_in_source)): ((usize, usize), (usize, usize)) = edge.get_node_and_neighbor_ids();
 
-                    let ((source, source_in_target), (target, target_in_source)): ((usize, usize), (usize, usize)) = edge.get_node_and_neighbor_ids();
-                    if component_ids.contains(&source) && component_ids.contains(&target) {
+                            let (new_source, new_target): (usize, usize) = (old_to_new_nodes[&source], old_to_new_nodes[&target]);
+                            let new_edge = Edge::new(next_edge_id, new_source, new_target, source_in_target, target_in_source, edge.get_message_length());
+                            next_edge_id += 1;
 
-                        let (new_source, new_target): (usize, usize) = (old_to_new_nodes[&source], old_to_new_nodes[&target]);
-                        let new_edge = Edge::new(next_edge_id, new_source, new_target, source_in_target, target_in_source, edge.get_message_length());
-                        next_edge_id += 1;
+                            old_to_new_edges.insert(edge_id, new_edge.get_id());
 
-                        component_edge_ids.insert(edge.get_id());
-                        old_to_new_edges.insert(edge.get_id(), new_edge.get_id());
-
-                        new_edges.push(new_edge);
+                            new_edges.push(new_edge);
+                        }
                     }
                 }
 
                 // Update edge ids of incident edges
                 for node in &mut new_nodes {
-                    let new_incident_edges: Vec<usize> = node.get_incident_edges().filter(|e| component_edge_ids.contains(e)).map(|e| old_to_new_edges[&e]).collect();
+                    let new_incident_edges: Vec<usize> = node.get_incident_edges().map(|e| old_to_new_edges[&e]).collect();
                     node.set_incident_edges(new_incident_edges.into_iter());
                 }
                 
@@ -451,139 +446,236 @@ impl CTFactorGraph {
                 components.push(subgraph);
             }
         }
-
         components
     }
-
-    /// Recursively explores connected nodes to identify all members of a component.
-    ///
-    /// # Arguments
-    /// * `start_id` - The starting node ID for the recursive traversal.
-    /// * `component_ids` - Mutable vector storing all node IDs in the current component.
-    /// * `old_to_new_nodes` - Mapping from original node IDs to new local component IDs.
-    /// * `visited` - A mutable set tracking visited node IDs to avoid revisiting.
-    fn find_component_rec(
-        &self, 
-        start_id: usize, 
-        component_ids: &mut Vec<usize>, 
-        old_to_new_nodes: &mut HashMap<usize, usize>, 
-        visited: &mut HashSet<usize>
-    ) {
-        let start_node: &Node = &self.nodes[start_id];
-        for neighbor_id in self.get_neighbors(&start_node) {
-            if visited.insert(neighbor_id) {
-                let next_id: usize = component_ids.len();
-                component_ids.push(neighbor_id);
-                old_to_new_nodes.insert(neighbor_id, next_id);
-                self.find_component_rec(neighbor_id, component_ids, old_to_new_nodes, visited);                
-            }
-        }
-    }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::{Node, NodeType, Factor};
+    use crate::node::{Node, NodeType};
 
-    fn sample_csv() -> String {
-        "id,sequence,score,psms,higher_taxa,weight,log_weight
-1,PEPTIDE1,0.8,3,100,0.5,-0.3
-2,PEPTIDE2,0.6,3,100,0.4,-0.5
-3,PEPTIDE3,0.9,3,200,0.7,-0.1"
-            .to_string()
+    /// Helper: build a simple graph with two variable nodes and one edge
+    fn simple_graph() -> CTFactorGraph {
+        let n0 = Node::new(
+            0,
+            NodeType::VariableNode {
+                output: false,
+                name: "A".into(),
+                initial_belief: [0.4, 0.6],
+            },
+        );
+
+        let n1 = Node::new(
+            1,
+            NodeType::VariableNode {
+                output: true,
+                name: "B".into(),
+                initial_belief: [0.0, 0.0],
+            },
+        );
+
+        let e0 = Edge::new(0, 0, 1, 0, 0, None);
+
+        let mut graph = CTFactorGraph::new(vec![n0, n1], vec![e0]);
+        graph.nodes[0].add_incident_edge(0);
+        graph.nodes[1].add_incident_edge(0);
+        graph
+    }
+
+    /* ----------------------------- Edge tests ----------------------------- */
+
+    #[test]
+    fn edge_new_and_getters() {
+        let e = Edge::new(3, 1, 2, 4, 5, Some(10));
+
+        assert_eq!(e.get_id(), 3);
+        assert_eq!(e.get_node_ids(), (1, 2));
+        assert_eq!(e.get_message_length(), Some(10));
     }
 
     #[test]
-    fn test_parse_taxon_weights_csv() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        assert_eq!(taxa.len(), 3);
-        assert_eq!(taxa[0].id, 1);
-        assert!((taxa[1].score - 0.6).abs() < 1e-6);
+    fn edge_setters() {
+        let mut e = Edge::new(0, 0, 1, 0, 0, None);
+
+        e.set_node1_in_node2_id(7);
+        e.set_node2_in_node1_id(9);
+
+        let ((_, n1_in_n2), (_, n2_in_n1)) = e.get_node_and_neighbor_ids();
+        assert_eq!(n1_in_n2, 7);
+        assert_eq!(n2_in_n1, 9);
     }
 
     #[test]
-    fn test_generate_graph_creates_graphml() {
-        let csv = sample_csv();
-        let graphml = generate_graph(csv).unwrap();
-        assert!(graphml.contains("graphml"));
-        assert!(graphml.contains("node"));
-        assert!(graphml.contains("edge"));
+    fn edge_copy_with_id() {
+        let e = Edge::new(1, 2, 3, 4, 5, Some(6));
+        let copy = e.copy_with_id(10);
+
+        assert_eq!(copy.get_id(), 10);
+        assert_eq!(copy.get_node_ids(), (2, 3));
+        assert_eq!(copy.get_message_length(), Some(6));
+    }
+
+    /* -------------------------- Graph basic tests -------------------------- */
+
+    #[test]
+    fn graph_new_and_counts() {
+        let g = simple_graph();
+
+        assert_eq!(g.node_count(), 2);
+        assert_eq!(g.edge_count(), 1);
     }
 
     #[test]
-    fn test_edge_getters() {
-        let edge = Edge::new(1, 10, 20, 0, 0, Some(5));
-        assert_eq!(edge.get_id(), 1);
-        assert_eq!(edge.get_node1_id(), 10);
-        assert_eq!(edge.get_node2_id(), 20);
-        assert_eq!(edge.get_node_ids(), (10, 20));
-        assert_eq!(edge.get_message_length(), Some(5));
+    fn graph_getters() {
+        let g = simple_graph();
+
+        assert_eq!(g.get_node(0).get_id(), 0);
+        assert_eq!(g.get_edge(0).get_id(), 0);
+        assert_eq!(g.get_nodes().len(), 2);
+        assert_eq!(g.get_edges().len(), 1);
     }
 
+    /* ---------------------------- GraphML tests ---------------------------- */
+
     #[test]
-    fn test_ctfactorgraph_from_taxa_weights() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        let graph = CTFactorGraph::from_taxa_weights(taxa);
-        assert!(graph.node_count() > 0);
-        assert!(graph.edge_count() > 0);
+    fn from_graphml_parses_graph() {
+        let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
+        <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+          <graph id="G" edgedefault="undirected">
+            <node id="X">
+              <data key="type">input</data>
+              <data key="belief">[0.2, 0.8]</data>
+            </node>
+            <node id="Y">
+              <data key="type">output</data>
+            </node>
+            <edge source="X" target="Y"/>
+          </graph>
+        </graphml>
+        "#;
+
+        let g = CTFactorGraph::from_graphml(graphml).unwrap();
+
+        assert_eq!(g.node_count(), 3);
+        assert!(g.nodes.iter().any(|n| n.is_factor_node()));
     }
 
-    #[test]
-    fn test_ctfactorgraph_to_and_from_graphml() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        let graph = CTFactorGraph::from_taxa_weights(taxa);
-        let graphml = graph.to_graphml();
-        assert!(graphml.is_ok());
-        let graphml = graphml.unwrap();
+    /* ------------------------- Factor-node creation ------------------------ */
 
-        let parsed = CTFactorGraph::from_graphml(&graphml).unwrap();
-        assert_eq!(graph.node_count(), parsed.node_count());
-        assert_eq!(graph.edge_count(), parsed.edge_count());
+    #[test]
+    fn add_factor_nodes_creates_factor_and_edge() {
+        let mut g = simple_graph();
+        g.add_factor_nodes();
+
+        assert!(g.nodes.iter().any(|n| n.is_factor_node()));
+        assert!(g.edge_count() > 1);
     }
 
-    #[test]
-    fn test_neighbor_operations() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        let graph = CTFactorGraph::from_taxa_weights(taxa);
+    /* --------------------------- Prior filling ----------------------------- */
 
-        if graph.node_count() > 1 {
-            let node = graph.get_node(0);
-            println!("{:?}\n\n{:?}", graph, node);
-            for n in graph.get_neighbors(node) {
-                assert!(n >= 0);
+    #[test]
+    fn fill_in_priors_sets_output_nodes() {
+        let mut g = simple_graph();
+        g.fill_in_priors(0.7);
+
+        for n in g.nodes.iter() {
+            if let NodeType::VariableNode { output: true, initial_belief, .. } = n.get_subtype() {
+                assert!((initial_belief[1] - 0.7).abs() < 1e-9);
             }
         }
     }
 
-    #[test]
-    fn test_get_peptide_for_factor_returns_ok_or_err() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        let graph = CTFactorGraph::from_taxa_weights(taxa);
+    /* -------------------------- Factor CPD filling ------------------------- */
 
-        for (i, node) in graph.get_nodes().iter().enumerate() {
-            if node.is_factor_node() {
-                let result = graph.get_peptide_for_factor(i);
-                assert!(result.is_ok() || result.is_err());
+    #[test]
+    fn fill_in_factors_initializes_factor_nodes() {
+        let mut g = simple_graph();
+        g.add_factor_nodes();
+        g.fill_in_factors(0.9, 0.1, false);
+
+        for n in g.nodes.iter() {
+            if let NodeType::FactorNode { initial_belief } = n.get_subtype() {
+                assert!(!initial_belief.is_empty());
             }
         }
     }
 
-    #[test]
-    fn test_connected_components() {
-        let csv = sample_csv();
-        let taxa = parse_taxon_weights_csv(csv).unwrap();
-        let graph = CTFactorGraph::from_taxa_weights(taxa);
+    /* -------------------------- Neighbor queries ---------------------------- */
 
-        let components = graph.connected_components();
-        assert!(!components.is_empty());
-        let total_nodes: usize = components.iter().map(|c| c.node_count()).sum();
-        assert_eq!(total_nodes, graph.node_count());
+    #[test]
+    fn get_neighbors_from_id() {
+        let g = simple_graph();
+        let neighbors: Vec<_> = g.get_neighbors_from_id(0).collect();
+
+        assert_eq!(neighbors, vec![1]);
+    }
+
+    #[test]
+    fn get_neighbor_node_and_neighbor_id() {
+        let g = simple_graph();
+        let node = g.get_node(0);
+        let (neighbor, neighbor_index) = g.get_neighbor_node_and_neighbor_id(node, 0);
+
+        assert_eq!(neighbor, 1);
+        assert_eq!(neighbor_index, 0);
+    }
+
+    /* ---------------------- Convolution tree expansion --------------------- */
+
+    #[test]
+    fn add_ct_nodes_adds_convolution_nodes() {
+        let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
+        <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+          <graph id="G" edgedefault="undirected">
+            <node id="A">
+              <data key="type">input</data>
+              <data key="belief">[0.5,0.5]</data>
+            </node>
+            <node id="B">
+              <data key="type">output</data>
+            </node>
+            <node id="C">
+              <data key="type">output</data>
+            </node>
+            <edge source="A" target="B"/>
+            <edge source="A" target="C"/>
+          </graph>
+        </graphml>
+        "#;
+
+        let mut g = CTFactorGraph::from_graphml(graphml).unwrap();
+        g.add_ct_nodes();
+
+        assert!(g.nodes.iter().any(|n| n.is_convolution_tree_node()));
+    }
+
+    /* ------------------------ Connected components ------------------------- */
+
+    #[test]
+    fn connected_components_splits_graph() {
+        let n0 = Node::new(
+            0,
+            NodeType::VariableNode {
+                output: false,
+                name: "A".into(),
+                initial_belief: [0.5, 0.5],
+            },
+        );
+        let n1 = Node::new(
+            1,
+            NodeType::VariableNode {
+                output: false,
+                name: "B".into(),
+                initial_belief: [0.5, 0.5],
+            },
+        );
+
+        let g = CTFactorGraph::new(vec![n0, n1], vec![]);
+        let components = g.connected_components();
+
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0].node_count(), 1);
+        assert_eq!(components[1].node_count(), 1);
     }
 }
