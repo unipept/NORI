@@ -1,5 +1,5 @@
 use crate::node::{Node, NodeType};
-use minidom::Element;
+use minidom::{Element};
 use std::collections::HashMap;
 use serde::Serialize;
 
@@ -86,7 +86,7 @@ impl Edge {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CTFactorGraph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -258,8 +258,15 @@ impl CTFactorGraph {
     /// * `beta` - Beta parameter for factor probability.
     /// * `regularized` - Whether to apply regularization.
     pub fn fill_in_factors(&mut self, alpha: f64, beta: f64, regularized: bool) {
-        for node in &mut self.nodes {
-            node.fill_in_factor(alpha, beta, regularized);
+        for i in 0..self.nodes.len() {
+            if self.nodes[i].is_factor_node() {
+                let mut degree = self.nodes[i].neighbors_count();
+                let neighbor: &Node = &self.nodes[self.get_neighbor_node_and_neighbor_id(&self.nodes[i], 0).0];
+                if neighbor.is_convolution_tree_node() {
+                    degree = neighbor.neighbors_count();
+                }
+                self.nodes[i].fill_in_factor(degree, alpha, beta, regularized);
+            }
         }
     }
 

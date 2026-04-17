@@ -211,8 +211,8 @@ impl MessagesInNode {
 
 
 /// Handles message passing and belief propagation in a convolution tree factor graph.
-pub struct Messages {
-    graph: CTFactorGraph,
+pub struct Messages<'a> {
+    graph: &'a CTFactorGraph,
     priorities: PriorityQueue<(u32, u32), OrderedFloat<f64>>,
     // Keeps track of residuals for duos of directed edges, indexed by [end_node][id of start node in end neighbours][id of neighbour in end node]
     total_residuals: Vec<Vec<Vec<f64>>>, 
@@ -225,7 +225,7 @@ pub struct Messages {
 }
 
 
-impl Messages {
+impl<'a> Messages<'a> {
 
     /// Constructs a new `Messages` instance for the given graph.
     ///
@@ -234,7 +234,7 @@ impl Messages {
     ///
     /// # Returns
     /// Initialized `Messages` object.
-    pub fn new(ct_graph_in: CTFactorGraph) -> Messages {        
+    pub fn new(ct_graph_in: &CTFactorGraph) -> Messages<'_> {        
         let priorities = PriorityQueue::new();
 
         let mut total_residuals: Vec<Vec<Vec<f64>>> = Vec::with_capacity(ct_graph_in.node_count());
@@ -793,7 +793,7 @@ mod tests {
     #[test]
     fn test_messages_zero_lookahead_bp() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         let beliefs = messages.zero_lookahead_bp(5,1e-6);
         assert!(beliefs.is_ok());
         let beliefs = beliefs.unwrap();
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn test_compute_out_message_variable() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         let msg = messages.compute_out_message_variable(0,1,0);
 
         let s: f64 = msg[0] + msg[1];
@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn test_compute_out_message_factor() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         let msg = messages.compute_out_message_factor(1,2,0,0);
         assert!(msg.is_ok());
         let msg = msg.unwrap();
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn test_compute_infinity_norm_residual_and_total_residuals() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         let residual = messages.compute_infinity_norm_residual(0,0);
         assert!(residual >= 0.0);
         messages.compute_total_residuals(0,1,0,0.1);
@@ -838,7 +838,7 @@ mod tests {
     #[test]
     fn test_compute_priority() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         for node_id in 0..6 {
             for neighbor_id in 0..2 {
                 messages.priorities.push((node_id, neighbor_id), OrderedFloat(0.1));
@@ -851,7 +851,7 @@ mod tests {
     #[test]
     fn test_single_message_update_and_compute_update() {
         let graph = create_minimal_graph();
-        let mut messages = Messages::new(graph);
+        let mut messages = Messages::new(&graph);
         let mut checked = HashSet::new();
         messages.single_message_update(0,1,0,Some(&mut checked)).unwrap();
         assert!(checked.is_empty() || checked.contains(&0)==false);

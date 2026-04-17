@@ -17,8 +17,8 @@ use csv::Writer;
 /// * `node_names` - Vector of node names in the same order as the belief results.
 /// * `node_categories` - Vector of node types (categories) corresponding to the nodes.
 /// * `results` - Vector of belief distributions for each node; each element is a vector `[P(0), P(1)]`.
-fn calibrate_all_subgraphs(
-    ct_factor_graphs: Vec<CTFactorGraph>,
+pub fn calibrate_all_subgraphs(
+    ct_factor_graphs: &Vec<CTFactorGraph>,
     max_iterations: u32,
     tolerance: f64
 ) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>>{
@@ -77,7 +77,7 @@ pub fn run_belief_propagation(
     let ct_factor_graphs: Vec<CTFactorGraph> = ct_factor_graph.connected_components();
 
     let results = calibrate_all_subgraphs(
-        ct_factor_graphs,
+        &ct_factor_graphs,
         max_iter,
         tol
     )?;
@@ -96,7 +96,7 @@ pub fn run_belief_propagation(
 /// # Returns
 ///
 /// CSV string with columns `[node_name, posterior_probability_1, node_category]`.
-fn generate_csv(results: Vec<(String, Vec<f64>)>) -> Result<String, Box<dyn std::error::Error>> {
+pub fn generate_csv(results: Vec<(String, Vec<f64>)>) -> Result<String, Box<dyn std::error::Error>> {
 
     let mut wtr = Writer::from_writer(vec![]);
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_all_subgraphs_empty() {
-        let res = calibrate_all_subgraphs(vec![], 10, 1e-6);
+        let res = calibrate_all_subgraphs(&vec![], 10, 1e-6);
         assert!(res.is_ok());
         let res = res.unwrap();
 

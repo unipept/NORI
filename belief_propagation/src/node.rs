@@ -160,41 +160,37 @@ impl Node {
     /// * `alpha` - Peptide detection probability.
     /// * `beta` - Noise parameter.
     /// * `regularized` - Whether to apply parent-count regularization.
-    pub fn fill_in_factor(&mut self, alpha: f64, beta: f64, regularized: bool) {
-        if self.is_factor_node() {
-            let degree: usize = self.neighbors_count();
+    pub fn fill_in_factor(&mut self, degree: usize, alpha: f64, beta: f64, regularized: bool) {
+        let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree);
+        let mut cpd_array_regularized = Vec::with_capacity(degree);
+        let exponent_array: Vec<usize> = (0..degree).collect();
+        let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..degree).map(|x| x as f64).collect();
+        
+        // regularize cpd priors to penalize higher number of parents
+        // log domain to avoid underflow
+        let mut cpd_sum: f64 = 0.0;
+        let mut cpd_regularized_sum: f64 = 0.0;
+        for (i, exp) in exponent_array.iter().enumerate() {
+            let cpd_0 = (1.0 - alpha).powi(*exp as i32) * (1.0 - beta);
+            let cpd_1 = 1.0 - cpd_0;
+            cpd_sum += cpd_0 + cpd_1;
+            cpd_array.push([cpd_0, cpd_1]);
 
-            let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree);
-            let mut cpd_array_regularized = Vec::with_capacity(degree);
-            let exponent_array: Vec<usize> = (0..degree).collect();
-            let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..degree).map(|x| x as f64).collect();
-            
-            // regularize cpd priors to penalize higher number of parents
-            // log domain to avoid underflow
-            let mut cpd_sum: f64 = 0.0;
-            let mut cpd_regularized_sum: f64 = 0.0;
-            for (i, exp) in exponent_array.iter().enumerate() {
-                let cpd_0 = (1.0 - alpha).powi(*exp as i32) * (1.0 - beta);
-                let cpd_1 = 1.0 - cpd_0;
-                cpd_sum += cpd_0 + cpd_1;
-                cpd_array.push([cpd_0, cpd_1]);
-
-                let cpd_regularized_0 = (cpd_0.powi(*exp as i32) * (1.0 - beta)) / divide_array[i];
-                let cpd_regularized_1 = 1.0 - cpd_regularized_0;
-                cpd_regularized_sum += cpd_regularized_0 + cpd_regularized_1;
-                cpd_array_regularized.push([cpd_regularized_0, cpd_regularized_1]);
-            }
-
-            // Normalize arrays (assuming normalize and avoid_underflow are implemented)
-            Self::normalize_cpd(&mut cpd_array, cpd_sum, false);
-            Self::normalize_cpd(&mut cpd_array_regularized, cpd_regularized_sum, true);
-            
-            // Create factor
-            let initial_belief = if regularized { cpd_array_regularized } else { cpd_array };
-            
-            // Add factor to the node's attributes
-            self.subtype = NodeType::FactorNode { initial_belief };
+            let cpd_regularized_0 = (cpd_0.powi(*exp as i32) * (1.0 - beta)) / divide_array[i];
+            let cpd_regularized_1 = 1.0 - cpd_regularized_0;
+            cpd_regularized_sum += cpd_regularized_0 + cpd_regularized_1;
+            cpd_array_regularized.push([cpd_regularized_0, cpd_regularized_1]);
         }
+
+        // Normalize arrays (assuming normalize and avoid_underflow are implemented)
+        Self::normalize_cpd(&mut cpd_array, cpd_sum, false);
+        Self::normalize_cpd(&mut cpd_array_regularized, cpd_regularized_sum, true);
+        
+        // Create factor
+        let initial_belief = if regularized { cpd_array_regularized } else { cpd_array };
+        
+        // Add factor to the node's attributes
+        self.subtype = NodeType::FactorNode { initial_belief };
     }
 
     /// Normalizes CPD values in-place.
@@ -349,7 +345,7 @@ mod tests {
     fn test_fill_in_factor() {
         let mut node = dummy_factor_node(2);
         node.add_incident_edge(0);
-        node.fill_in_factor(0.5, 0.1, false);
+        node.fill_in_factor(1, 0.5, 0.1, false);
         if let NodeType::FactorNode { initial_belief, .. } = node.get_subtype() {
             assert!(!initial_belief.is_empty());
         } else {
