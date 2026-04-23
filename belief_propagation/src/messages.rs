@@ -1,7 +1,7 @@
 use crate::factor_graph::CTFactorGraph;
 use crate::node::{Node, NodeType};
 use std::collections::HashSet;
-use std::mem;
+use std::{mem, vec};
 use crate::array_utils::*;
 use crate::convolution_tree::ConvolutionTree;
 use priority_queue::PriorityQueue;
@@ -12,9 +12,9 @@ use crate::array_utils::sum_logs_batched;
 #[derive(Debug, Clone)]
 pub enum NodeBelief {
     /// Belief for variable nodes: two probabilities (inactive, active).
-    VariableBelief([f64; 2]),
+    VariableBelief([f32; 2]),
     /// Belief for factor nodes: list of probability pairs.
-    FactorBelief(Vec<[f64;2]>),
+    FactorBelief(Vec<[f32;2]>),
     /// Belief placeholder for convolution tree nodes.
     ConvolutionTreeBelief
 }
@@ -42,7 +42,7 @@ impl NodeBelief {
     ///
     /// # Returns
     /// Vector of belief values.
-    pub fn values(&self) -> Vec<f64> {
+    pub fn values(&self) -> Vec<f32> {
         match self {
             NodeBelief::VariableBelief([a, b]) => vec![*a, *b],
             NodeBelief::FactorBelief(vec) => vec.iter().flat_map(|arr| arr.to_vec()).collect(),
@@ -50,12 +50,12 @@ impl NodeBelief {
         }
     }
 
-    /// Returns the belief values as a fixed-size array `[f64; 2]` for variable nodes (peptide or taxon).
+    /// Returns the belief values as a fixed-size array `[f32; 2]` for variable nodes (peptide or taxon).
     ///
     /// # Returns
-    /// * `Some([f64; 2])` if the node is a peptide or taxon node.
+    /// * `Some([f32; 2])` if the node is a peptide or taxon node.
     /// * `None` if the node is a factor or convolution tree node.
-    pub fn variable_values(&self) -> Option<[f64; 2]> {
+    pub fn variable_values(&self) -> Option<[f32; 2]> {
         match self {
             NodeBelief::VariableBelief(belief) => Some(*belief),
             _ => None
@@ -65,8 +65,8 @@ impl NodeBelief {
     /// Returns factor values if this is a factor belief.
     ///
     /// # Returns
-    /// `Some(Vec<[f64; 2]>)` if factor, otherwise `None`.
-    pub fn factor_values(&self) -> Option<&Vec<[f64; 2]>> {
+    /// `Some(Vec<[f32; 2]>)` if factor, otherwise `None`.
+    pub fn factor_values(&self) -> Option<&Vec<[f32; 2]>> {
         match self {
             NodeBelief::FactorBelief(vec) => Some(vec),
             _ => None
@@ -78,15 +78,15 @@ impl NodeBelief {
 #[derive(Clone, Debug)]
 pub enum MessagesInNode {
     MessagesInVariable {
-        messages: Vec<[f64; 2]>,
+        messages: Vec<[f32; 2]>,
     },
     MessagesInFactor {
-        ct_message: Option<Vec<f64>>,
-        variable_messages: Vec<[f64; 2]>,
+        ct_message: Option<Vec<f32>>,
+        variable_messages: Vec<[f32; 2]>,
     },
     MessagesInCTree {
-        factor_message: Vec<f64>,
-        variable_messages: Vec<[f64; 2]>,
+        factor_message: Vec<f32>,
+        variable_messages: Vec<[f32; 2]>,
     },
 }
 
@@ -95,8 +95,8 @@ impl MessagesInNode {
     /// Returns all variable messages stored in the node.
     ///
     /// # Returns
-    /// Reference to a vector of `[f64; 2]` messages.
-    pub fn get_messages(&self) -> &Vec<[f64;2]> {
+    /// Reference to a vector of `[f32; 2]` messages.
+    pub fn get_messages(&self) -> &Vec<[f32;2]> {
         match self {
             MessagesInNode::MessagesInVariable { messages } => messages,
             MessagesInNode::MessagesInFactor { variable_messages, .. } => variable_messages,
@@ -109,7 +109,7 @@ impl MessagesInNode {
     /// # Arguments
     /// * `neighbor_index` - Index of the neighbor.
     /// * `message` - New message to store.
-    pub fn set_message(&mut self, neighbor_index: usize, message: [f64; 2]) {
+    pub fn set_message(&mut self, neighbor_index: usize, message: [f32; 2]) {
         match self {
             MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index] = message,
             MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
@@ -129,8 +129,8 @@ impl MessagesInNode {
     /// * `neighbor_index` - Index of the neighbor.
     ///
     /// # Returns
-    /// Message as `[f64; 2]`.
-    pub fn get_message(&self, neighbor_index: usize) -> [f64;2] {
+    /// Message as `[f32; 2]`.
+    pub fn get_message(&self, neighbor_index: usize) -> [f32;2] {
         match self {
             MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index],
             MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
@@ -173,8 +173,8 @@ impl MessagesInNode {
     /// Retrieves the convolution tree message if it exists.
     ///
     /// # Returns
-    /// `Ok(&Vec<f64>)` if message exists, error otherwise.
-    pub fn get_ct_message(&self) -> Result<&Vec<f64>, Box<dyn std::error::Error>> {
+    /// `Ok(&Vec<f32>)` if message exists, error otherwise.
+    pub fn get_ct_message(&self) -> Result<&Vec<f32>, Box<dyn std::error::Error>> {
         match self {
             MessagesInNode::MessagesInCTree { factor_message, .. } => Ok(factor_message),
             MessagesInNode::MessagesInFactor { ct_message, .. } => {
@@ -194,7 +194,7 @@ impl MessagesInNode {
     ///
     /// # Returns
     /// `Ok(())` on success, error if node type is incompatible.
-    pub fn set_ct_message(&mut self, message: Vec<f64>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_ct_message(&mut self, message: Vec<f32>) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             MessagesInNode::MessagesInCTree { factor_message, .. } => {
                 *factor_message = message;
@@ -213,9 +213,9 @@ impl MessagesInNode {
 /// Handles message passing and belief propagation in a convolution tree factor graph.
 pub struct Messages<'a> {
     graph: &'a CTFactorGraph,
-    priorities: PriorityQueue<(u32, u32), OrderedFloat<f64>>,
+    priorities: PriorityQueue<(u32, u32), OrderedFloat<f32>>,
     // Keeps track of residuals for duos of directed edges, indexed by [end_node][id of start node in end neighbours][id of neighbour in end node]
-    total_residuals: Vec<Vec<Vec<f64>>>, 
+    total_residuals: Vec<Vec<f32>>, 
     // Maps a node ID onto its current belief value
     current_beliefs: Vec<NodeBelief>, 
     // incoming messages for each node [end node][neighbour id]
@@ -237,10 +237,10 @@ impl<'a> Messages<'a> {
     pub fn new(ct_graph_in: &CTFactorGraph) -> Messages<'_> {        
         let priorities = PriorityQueue::new();
 
-        let mut total_residuals: Vec<Vec<Vec<f64>>> = Vec::with_capacity(ct_graph_in.node_count());
+        let mut total_residuals: Vec<Vec<f32>> = Vec::with_capacity(ct_graph_in.node_count());
         for node in ct_graph_in.get_nodes() {
-            
-            let total_residual_node: Vec<Vec<f64>> = vec![vec![0.0; node.neighbors_count()]; node.neighbors_count()];
+
+            let total_residual_node: Vec<f32> = vec![0.0; node.neighbors_count() * node.neighbors_count()];
 
             total_residuals.push(total_residual_node);
 
@@ -305,7 +305,7 @@ impl<'a> Messages<'a> {
     /// * `node_id` - Node ID of the message.
     /// * `neighbor_id` - Neighbor ID of the message.
     /// * `priority` - Priority value.
-    pub fn push_priority(&mut self, node_id: usize, neighbor_id: usize, priority: f64) {
+    pub fn push_priority(&mut self, node_id: usize, neighbor_id: usize, priority: f32) {
         self.priorities.push((node_id as u32, neighbor_id as u32), OrderedFloat(priority));
     }
 
@@ -313,7 +313,7 @@ impl<'a> Messages<'a> {
     ///
     /// # Returns
     /// Tuple of `(node_id, neighbor_id)` and priority.
-    pub fn get_highest_priority(&self) -> Result<((usize, usize), f64), Box<dyn std::error::Error>> {
+    pub fn get_highest_priority(&self) -> Result<((usize, usize), f32), Box<dyn std::error::Error>> {
         let (&(end_id, start_in_end_id), &residual) = self.priorities.peek().ok_or("Priorities is empty")?;
         Ok(((end_id as usize, start_in_end_id as usize), residual.0))
     }
@@ -326,9 +326,9 @@ impl<'a> Messages<'a> {
     ///
     /// # Returns
     /// Final node beliefs as a list of value vectors.
-    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f64) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>> {
+    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f32) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>> {
 
-        let mut max_residual: f64 = f64::MAX;
+        let mut max_residual: f32 = f32::MAX;
 
         // first, do 5 loops where I update all messages
         for _ in 0..5 {
@@ -400,15 +400,15 @@ impl<'a> Messages<'a> {
         // marginalize once the model has converged
         for node in self.graph.get_nodes() {
             if node.is_output_node() {
-                let incoming_messages: &Vec<[f64; 2]> = self.msg_in[node.get_id()].get_messages();
+                let incoming_messages: &Vec<[f32; 2]> = self.msg_in[node.get_id()].get_messages();
                     
-                let initial_belief: [f64; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
+                let initial_belief: [f32; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
 
-                let sum_logs: [f64;2] = incoming_messages.iter()
+                let sum_logs: [f32;2] = incoming_messages.iter()
                     .fold([0.0;2], |mut acc,  row| {acc[0] += row[0].ln(); acc[1] += row[1].ln(); acc});
 
                 // Compute final log-normalized message
-                let mut logged_variable_marginal: [f64; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
+                let mut logged_variable_marginal: [f32; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
                 log_normalize(&mut logged_variable_marginal);
 
                 self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
@@ -492,18 +492,18 @@ impl<'a> Messages<'a> {
     /// 
     /// # Returns
     /// Normalized probability array.
-    fn compute_out_message_variable(&mut self, start_id: usize, _end_id: usize, end_in_start_id: usize) -> [f64; 2] {
+    fn compute_out_message_variable(&mut self, start_id: usize, _end_id: usize, end_in_start_id: usize) -> [f32; 2] {
         // Message to compute: Protein -> factor/convolution node, or peptide -> factor node
         
-        let node_belief: [f64; 2] = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a TaxonBelief or PeptideBelief");
+        let node_belief: [f32; 2] = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a TaxonBelief or PeptideBelief");
 
         if self.msg_in[start_id].get_message_count() <= 1 {
             return node_belief;
         }
 
         // Sum of incoming messages, need for logs to prevent underflow in very large multiplications
-        let incoming_messages: &Vec<[f64; 2]> = self.msg_in[start_id].get_messages();
-        let mut out_message_log: [f64; 2] = sum_logs_batched(incoming_messages);
+        let incoming_messages: &Vec<[f32; 2]> = self.msg_in[start_id].get_messages();
+        let mut out_message_log: [f32; 2] = sum_logs_batched(incoming_messages);
         // Take message coming from end node out of the result.
         let msg_from_end = incoming_messages[end_in_start_id];
         out_message_log[0] -= ln_from_table(msg_from_end[0]);
@@ -526,9 +526,9 @@ impl<'a> Messages<'a> {
     /// 
     /// # Returns
     /// Normalized probability vector.
-    fn compute_out_message_factor(&mut self, start_id: usize, end_id: usize, end_in_start_id: usize, start_in_end_id: usize) -> Result<[f64; 2], Box<dyn std::error::Error>> {
+    fn compute_out_message_factor(&mut self, start_id: usize, end_id: usize, end_in_start_id: usize, start_in_end_id: usize) -> Result<[f32; 2], Box<dyn std::error::Error>> {
         let incoming_messages: &MessagesInNode = &self.msg_in[start_id];
-        let node_belief: &Vec<[f64;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
+        let node_belief: &Vec<[f32;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
         
         let end_node = self.graph.get_node(end_id);
         if let NodeType::VariableNode { output: false, .. } = end_node.get_subtype() {
@@ -538,10 +538,10 @@ impl<'a> Messages<'a> {
 
         // Factor -> Output variable node
         // incoming_messages is always a 2x2, we must ignore row end_in_start_id, so product is just the other row
-        let prod: [f64; 2] = incoming_messages.get_message(1-end_in_start_id);
+        let prod: [f32; 2] = incoming_messages.get_message(1-end_in_start_id);
         
         // Compute final normalized message
-        let mut out_message: Vec<f64> = node_belief.iter().map(|&a| a[0] * prod[0] + a[1] * prod[1]).collect();
+        let mut out_message: Vec<f32> = node_belief.iter().map(|&a| a[0] * prod[0] + a[1] * prod[1]).collect();
         normalize(&mut out_message);
 
         return Ok([out_message[0], out_message[1]]);
@@ -556,12 +556,12 @@ impl<'a> Messages<'a> {
     /// 
     /// # Returns
     /// Normalized probability vector.
-    fn compute_out_message_factor_ctree(&mut self, start_id: usize, _end_id: usize, _end_in_start_id: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
-        let incoming_message: &[f64; 2] = &self.msg_in[start_id].get_message(1);
-        let node_belief: &Vec<[f64;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
+    fn compute_out_message_factor_ctree(&mut self, start_id: usize, _end_id: usize, _end_in_start_id: usize) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+        let incoming_message: &[f32; 2] = &self.msg_in[start_id].get_message(1);
+        let node_belief: &Vec<[f32;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
         
         // Compute final normalized message
-        let mut out_message: Vec<f64> = node_belief.iter().map(|&a| a[0] * incoming_message[0] + a[1] * incoming_message[1]).collect();
+        let mut out_message: Vec<f32> = node_belief.iter().map(|&a| a[0] * incoming_message[0] + a[1] * incoming_message[1]).collect();
         normalize(&mut out_message);
         
         return Ok(out_message);
@@ -578,12 +578,12 @@ impl<'a> Messages<'a> {
         let prot_list: &[usize] = &neighbor_list[1..];
         let (factor_id, _) = self.graph.get_neighbor_node_and_neighbor_id(start_node, 0);
         
-        let shared_likelihoods: &Vec<f64> = self.msg_in[start_id].get_ct_message()?;
-        let old_shared_likelihoods: &Vec<f64> = self.msg_in_log[start_id].get_ct_message()?;
+        let shared_likelihoods: &Vec<f32> = self.msg_in[start_id].get_ct_message()?;
+        let old_shared_likelihoods: &Vec<f32> = self.msg_in_log[start_id].get_ct_message()?;
 
-        let prot_prob_list: &Vec<[f64; 2]> = self.msg_in[start_id].get_messages();
+        let prot_prob_list: &Vec<[f32; 2]> = self.msg_in[start_id].get_messages();
 
-        let old_prot_prob_list: &Vec<[f64; 2]> = self.msg_in_log[start_id].get_messages();
+        let old_prot_prob_list: &Vec<[f32; 2]> = self.msg_in_log[start_id].get_messages();
 
         if old_shared_likelihoods != shared_likelihoods && 
             prot_prob_list.iter().zip(old_prot_prob_list.iter()).any(|(a, b)| a[0] != b[0]) {
@@ -623,8 +623,8 @@ impl<'a> Messages<'a> {
     /// * `start_in_end_id` - Neighbor index of destination in source.
     /// 
     /// # Returns
-    /// Residual as `f64`.
-    fn compute_infinity_norm_residual(&mut self, end_id: usize, start_in_end_id: usize) -> f64 {
+    /// Residual as `f32`.
+    fn compute_infinity_norm_residual(&mut self, end_id: usize, start_in_end_id: usize) -> f32 {
 
         if self.msg_in[end_id].is_ct_message(start_in_end_id) {
             let msg1 = self.msg_in[end_id].get_ct_message().unwrap();
@@ -633,13 +633,13 @@ impl<'a> Messages<'a> {
             let residual = msg1.iter()
                             .zip(msg2.iter())
                             .map(|(m1, m2)| (m1 / m2).ln().abs())
-                            .fold(f64::NEG_INFINITY, f64::max);
+                            .fold(f32::NEG_INFINITY, f32::max);
 
             return residual;
         }
 
-        let msg1: &mut [f64; 2] = &mut self.msg_in[end_id].get_message(start_in_end_id);
-        let msg2: &[f64; 2] = &self.msg_in_log[end_id].get_message(start_in_end_id);
+        let msg1: &mut [f32; 2] = &mut self.msg_in[end_id].get_message(start_in_end_id);
+        let msg2: &[f32; 2] = &self.msg_in_log[end_id].get_message(start_in_end_id);
 
         (msg1[0] / msg2[0]).max(msg1[1] / msg2[1]).ln().abs()
     }
@@ -651,20 +651,21 @@ impl<'a> Messages<'a> {
     /// * `end_id` - ID of destination node.
     /// * `end_in_start_id` - Neighbor index of destination in source.
     /// * `current_residual` - Redidual to add to message
-    fn compute_total_residuals(&mut self, start_id: usize, end_id: usize, start_in_end_id: usize, current_residual: f64) {
+    fn compute_total_residuals(&mut self, start_id: usize, end_id: usize, start_in_end_id: usize, current_residual: f32) {
         let start_node = self.graph.get_node(start_id);
         let end_node = self.graph.get_node(end_id);
         let (_, end_in_start_id) = self.graph.get_neighbor_node_and_neighbor_id(end_node, start_in_end_id);
 
+        let neighbor_count_start = start_node.neighbors_count();
         for (i, neighbor_id) in self.graph.get_neighbors(start_node).enumerate() {
             if neighbor_id != end_id {
-                self.total_residuals[start_id][i][end_in_start_id] = 0.0;
+                self.total_residuals[start_id][i * neighbor_count_start + end_in_start_id] = 0.0;
             }
         }
 
         for (i, neighbor_id) in self.graph.get_neighbors(end_node).enumerate() {
             if neighbor_id != start_id {
-                self.total_residuals[end_id][start_in_end_id][i] += current_residual;
+                self.total_residuals[end_id][start_in_end_id * end_node.neighbors_count() + i] += current_residual;
             }
         }
     }
@@ -683,12 +684,13 @@ impl<'a> Messages<'a> {
         for i in 0..end_node.neighbors_count() {
             let (neighbor_id, end_in_neighbor_id) = self.graph.get_neighbor_node_and_neighbor_id(&end_node, i);
             if neighbor_id != start_id {
-                let priority: f64 = self.graph
+                let end_node_neighbor_count = end_node.neighbors_count();
+                let priority: f32 = self.graph
                     .get_neighbors(end_node)
                     .enumerate()
                     .map(|(j, sum_run)| {
                         if sum_run != neighbor_id { 
-                            self.total_residuals[end_id][j][i]
+                            self.total_residuals[end_id][j * end_node_neighbor_count + i]
                         } else { 
                             0.0
                         }
@@ -799,7 +801,7 @@ mod tests {
         let beliefs = beliefs.unwrap();
 
         assert_eq!(beliefs.len(),1);
-        let sum: f64 = beliefs[0].1.iter().sum();
+        let sum: f32 = beliefs[0].1.iter().sum();
         assert!((sum-1.0).abs()<1e-6);
     }
 
@@ -809,7 +811,7 @@ mod tests {
         let mut messages = Messages::new(&graph);
         let msg = messages.compute_out_message_variable(0,1,0);
 
-        let s: f64 = msg[0] + msg[1];
+        let s: f32 = msg[0] + msg[1];
         assert!((s-1.0).abs()<1e-6);
     }
 
@@ -821,7 +823,7 @@ mod tests {
         assert!(msg.is_ok());
         let msg = msg.unwrap();
 
-        let s: f64 = msg[0] + msg[1];
+        let s: f32 = msg[0] + msg[1];
         assert!((s-1.0).abs()<1e-6);
     }
 
@@ -832,7 +834,7 @@ mod tests {
         let residual = messages.compute_infinity_norm_residual(0,0);
         assert!(residual >= 0.0);
         messages.compute_total_residuals(0,1,0,0.1);
-        assert!(messages.total_residuals[1][0][1] > 0.0);
+        assert!(messages.total_residuals[1][1] > 0.0);
     }
 
     #[test]

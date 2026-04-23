@@ -20,15 +20,15 @@ use csv::Writer;
 pub fn calibrate_all_subgraphs(
     ct_factor_graphs: &Vec<CTFactorGraph>,
     max_iterations: u32,
-    tolerance: f64
-) -> Result<Vec<(String, Vec<f64>)>, Box<dyn std::error::Error>>{
-    let mut results: Vec<(String, Vec<f64>)> = Vec::new();
+    tolerance: f32
+) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>>{
+    let mut results: Vec<(String, Vec<f32>)> = Vec::new();
 
     for subgraph in ct_factor_graphs {
         if subgraph.node_count() > 2 {
 
             let mut messages = Messages::new(subgraph);
-            let beliefs: Vec<(String, Vec<f64>)> = messages.zero_lookahead_bp(
+            let beliefs: Vec<(String, Vec<f32>)> = messages.zero_lookahead_bp(
                 max_iterations,
                 tolerance
             )?;
@@ -63,12 +63,12 @@ pub fn calibrate_all_subgraphs(
 /// `[node_name, posterior_probability_1, node_category]`
 pub fn run_belief_propagation(
     graph: String,
-    alpha: f64,
-    beta: f64,
+    alpha: f32,
+    beta: f32,
     regularized: bool,
-    prior: f64,
+    prior: f32,
     max_iter: u32,
-    tol: f64
+    tol: f32
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut ct_factor_graph = CTFactorGraph::from_graphml(&graph)?;
     ct_factor_graph.fill_in_factors(alpha, beta, regularized);
@@ -96,7 +96,7 @@ pub fn run_belief_propagation(
 /// # Returns
 ///
 /// CSV string with columns `[node_name, posterior_probability_1, node_category]`.
-pub fn generate_csv(results: Vec<(String, Vec<f64>)>) -> Result<String, Box<dyn std::error::Error>> {
+pub fn generate_csv(results: Vec<(String, Vec<f32>)>) -> Result<String, Box<dyn std::error::Error>> {
 
     let mut wtr = Writer::from_writer(vec![]);
 

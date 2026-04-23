@@ -1,8 +1,8 @@
 use crate::node::{Node, NodeType};
-use minidom::{Element};
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::Reader;
 use std::collections::HashMap;
 use serde::Serialize;
-
 
 /// Represents an edge in a factor graph connecting two nodes.
 #[derive(Debug, Serialize, Clone)]
@@ -151,15 +151,25 @@ impl CTFactorGraph {
      /// Parses an XML `<edge>` element and extracts its source and target node names.
     ///
     /// # Arguments
-    /// * `edge` - A reference to a `minidom::Element` representing an edge in GraphML.
+    /// * `edge` - The XML event for an edge element.
     ///
     /// # Returns
     /// Returns a tuple `(source, target)` representing the IDs of connected nodes.
-    fn parse_edge(edge: &Element) -> Result<(String, String), Box<dyn std::error::Error>> {
-        let source: String = edge.attr("source").ok_or("Source attribute does not exist in Edge")?.to_string();
-        let target: String = edge.attr("target").ok_or("Target attribute does not exist in Edge")?.to_string();
-    
-        Ok((source, target))
+    fn parse_edge(edge: &BytesStart) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let source = Self::get_attr(edge, b"source")?;
+        let target = Self::get_attr(edge, b"target")?;
+
+        Ok((source.to_string(), target.to_string()))
+    }
+
+    fn get_attr(element: &BytesStart, key: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+        for attribute in element.attributes().with_checks(false) {
+            let attribute = attribute?;
+            if attribute.key.as_ref() == key {
+                return Ok(std::str::from_utf8(&attribute.value)?.to_string());
+            }
+        }
+        Err(format!("missing attribute {}", std::str::from_utf8(key)?).into())
     }
     
     /// Constructs a `CTFactorGraph` from a GraphML string.
@@ -173,48 +183,81 @@ impl CTFactorGraph {
     /// # Errors
     /// Returns an error if parsing the GraphML fails or if nodes/edges cannot be created correctly.
     pub fn from_graphml(graphml_str: &str) -> Result<CTFactorGraph, Box<dyn std::error::Error>> {
-        let root: Element = graphml_str.parse()?;
+        let mut reader = Reader::from_str(graphml_str);
+        reader.trim_text(true);
 
-        let node_count = root.children().filter(|n| n.name() == "graph").map(|g| g.children().filter(|n| n.name() == "node").count()).sum();
-        let mut nodes: Vec<Node> = Vec::with_capacity(node_count);
-        let edge_count = root.children().filter(|n| n.name() == "graph").map(|g| g.children().filter(|n| n.name() == "edge").count()).sum();
-        let mut edges: Vec<Edge> = Vec::with_capacity(edge_count);
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut edges: Vec<Edge> = Vec::new();
         let mut node_map: HashMap<String, usize> = HashMap::new();
-        
+
         let mut next_node_id = 0;
         let mut next_edge_id = 0;
-        for graph_xml in root.children().filter(|n| n.name() == "graph") {
-            for node_xml in graph_xml.children().filter(|n| n.name() == "node") {
-                let node: Node = Node::parse_node(node_xml, next_node_id)?;
-                let node_name: String = node.get_name()?.to_string();
-                node_map.insert(node_name, next_node_id);
-                next_node_id += 1;
+        let mut current_node_id: Option<String> = None;
+        let mut current_node_data: HashMap<String, String> = HashMap::new();
+        let mut current_data_key: Option<String> = None;
+        let mut current_data_value = String::new();
 
-                nodes.push(node);
-            }
-    
-            for edge_xml in graph_xml.children().filter(|n| n.name() == "edge") {
-                let (source, target) = Self::parse_edge(edge_xml)?;
-    
-                let node1_id: usize = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
-                let node2_id: usize = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
-                let node1: &Node = &nodes[node1_id];
-                let node2: &Node = &nodes[node2_id];
-                let edge = Edge::new(next_edge_id, node1_id, node2_id, node2.neighbors_count(), node1.neighbors_count(), None);
-                next_edge_id += 1;
-    
-                let node1: &mut Node = &mut nodes[node1_id];
-                node1.add_incident_edge(edge.get_id());
-                let node2: &mut Node = &mut nodes[node2_id];
-                node2.add_incident_edge(edge.get_id());
-                edges.push(edge);
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                    b"node" => {
+                        let node_id = Self::get_attr(e, b"id")?;
+                        current_node_id = Some(node_id);
+                        current_node_data.clear();
+                    }
+                    b"data" => {
+                        let key = Self::get_attr(e, b"key")?;
+                        current_data_key = Some(key);
+                        current_data_value.clear();
+                    }
+                    _ => {}
+                },
+                Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                    b"edge" => {
+                        let (source, target) = Self::parse_edge(e)?;
+                        let node1_id = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
+                        let node2_id = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
+                        let node1_degree = nodes[node1_id].neighbors_count();
+                        let node2_degree = nodes[node2_id].neighbors_count();
+                        let edge = Edge::new(next_edge_id, node1_id, node2_id, node2_degree, node1_degree, None);
+                        next_edge_id += 1;
+
+                        nodes[node1_id].add_incident_edge(edge.get_id());
+                        nodes[node2_id].add_incident_edge(edge.get_id());
+                        edges.push(edge);
+                    }
+                    _ => {}
+                },
+                Ok(Event::Text(e)) => {
+                    if current_data_key.is_some() {
+                        let text = e.unescape()?;
+                        current_data_value.push_str(&text);
+                    }
+                }
+                Ok(Event::End(ref e)) => match e.name().as_ref() {
+                    b"data" => {
+                        if let Some(key) = current_data_key.take() {
+                            current_node_data.insert(key, current_data_value.clone());
+                        }
+                    }
+                    b"node" => {
+                        let node_name = current_node_id.take().ok_or("Node end without start")?;
+                        let node = Node::parse_node_from_parts(next_node_id, node_name.clone(), current_node_data.clone())?;
+                        node_map.insert(node_name, next_node_id);
+                        next_node_id += 1;
+                        nodes.push(node);
+                        current_node_data.clear();
+                    }
+                    _ => {}
+                },
+                Ok(Event::Eof) => break,
+                Err(err) => return Err(format!("XML parse error: {}", err).into()),
+                _ => {}
             }
         }
-        
         let mut graph = CTFactorGraph { nodes, edges };
         graph.add_factor_nodes();
-    
-        Ok( graph )
+        Ok(graph)
     }
 
     pub fn add_factor_nodes(&mut self) {
@@ -245,7 +288,7 @@ impl CTFactorGraph {
     ///
     /// # Arguments
     /// * `prior` - The prior probability to assign to each node.
-    pub fn fill_in_priors(&mut self, prior: f64) {
+    pub fn fill_in_priors(&mut self, prior: f32) {
         for node in &mut self.nodes {
             node.fill_in_prior(prior);
         }
@@ -257,7 +300,7 @@ impl CTFactorGraph {
     /// * `alpha` - Alpha parameter for factor probability.
     /// * `beta` - Beta parameter for factor probability.
     /// * `regularized` - Whether to apply regularization.
-    pub fn fill_in_factors(&mut self, alpha: f64, beta: f64, regularized: bool) {
+    pub fn fill_in_factors(&mut self, alpha: f32, beta: f32, regularized: bool) {
         for i in 0..self.nodes.len() {
             if self.nodes[i].is_factor_node() {
                 let mut degree = self.nodes[i].neighbors_count();

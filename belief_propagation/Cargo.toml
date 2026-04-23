@@ -1,10 +1,10 @@
 [package]
-name = "belief_propagation"
+name = "infernor"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "belief_propagation"
+name = "infernor"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -12,8 +12,8 @@ serde_json = "1.0"
 csv = "1.1"
 petgraph = { version = "0.6", features = ["serde-1"] }
 minidom = "0.15"
+quick-xml = "0.29"
 rustfft = { version = "6.2.0", features = ["wasm_simd"] }
 priority-queue = "2.7.0"
 ordered-float = "4.2"
 fast-math = "0.1"
-

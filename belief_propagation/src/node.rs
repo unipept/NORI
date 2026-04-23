@@ -7,9 +7,9 @@ use serde::Serialize;
 #[derive(Debug, Serialize, Clone)]
 pub enum NodeType {
     /// Variable node with prior probabilities.
-    VariableNode { output: bool, name: String, initial_belief: [f64; 2] },
+    VariableNode { output: bool, name: String, initial_belief: [f32; 2] },
     /// Factor node with CPD.
-    FactorNode { initial_belief: Vec<[f64; 2]> },
+    FactorNode { initial_belief: Vec<[f32; 2]> },
     /// Convolution tree node.
     ConvolutionTreeNode
 }
@@ -148,7 +148,7 @@ impl Node {
     ///
     /// # Arguments
     /// * `prior` - Probability to assign as active.
-    pub fn fill_in_prior(&mut self, prior: f64) {
+    pub fn fill_in_prior(&mut self, prior: f32) {
         if let NodeType::VariableNode { output: true , name, .. } = &self.subtype {
             self.subtype = NodeType::VariableNode { output: true, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
         }
@@ -160,16 +160,16 @@ impl Node {
     /// * `alpha` - Peptide detection probability.
     /// * `beta` - Noise parameter.
     /// * `regularized` - Whether to apply parent-count regularization.
-    pub fn fill_in_factor(&mut self, degree: usize, alpha: f64, beta: f64, regularized: bool) {
-        let mut cpd_array: Vec<[f64; 2]> = Vec::with_capacity(degree);
+    pub fn fill_in_factor(&mut self, degree: usize, alpha: f32, beta: f32, regularized: bool) {
+        let mut cpd_array: Vec<[f32; 2]> = Vec::with_capacity(degree);
         let mut cpd_array_regularized = Vec::with_capacity(degree);
         let exponent_array: Vec<usize> = (0..degree).collect();
-        let divide_array: Vec<f64> = std::iter::once(1usize).chain(1..degree).map(|x| x as f64).collect();
+        let divide_array: Vec<f32> = std::iter::once(1usize).chain(1..degree).map(|x| x as f32).collect();
         
         // regularize cpd priors to penalize higher number of parents
         // log domain to avoid underflow
-        let mut cpd_sum: f64 = 0.0;
-        let mut cpd_regularized_sum: f64 = 0.0;
+        let mut cpd_sum: f32 = 0.0;
+        let mut cpd_regularized_sum: f32 = 0.0;
         for (i, exp) in exponent_array.iter().enumerate() {
             let cpd_0 = (1.0 - alpha).powi(*exp as i32) * (1.0 - beta);
             let cpd_1 = 1.0 - cpd_0;
@@ -199,7 +199,7 @@ impl Node {
     /// * `arr` - CPD array.
     /// * `sum` - Normalization constant.
     /// * `avoid_underflow` - If true, enforce minimum values.
-    fn normalize_cpd(arr: &mut Vec<[f64; 2]>, sum: f64, avoid_underflow: bool) {
+    fn normalize_cpd(arr: &mut Vec<[f32; 2]>, sum: f32, avoid_underflow: bool) {
         for cpd in arr.iter_mut() {
             cpd[0] /= sum;
             cpd[1] /= sum;
@@ -225,8 +225,60 @@ impl Node {
     fn parse_data(data: &Element) -> Result<(String, String), Box<dyn std::error::Error>> {
         let key = data.attr("key").ok_or("key not found while parsing Node data")?.to_string();
         let value = data.text();
-    
+
         Ok((key, value))
+    }
+
+    /// Parses a GraphML node from a node id and data map.
+    ///
+    /// # Arguments
+    /// * `id` - New numeric node ID.
+    /// * `name` - GraphML node id string.
+    /// * `current_node_data` - Parsed `<data>` fields for the node.
+    ///
+    /// # Returns
+    /// A new `Node` or error if subtype is unknown.
+    pub fn parse_node_from_parts(
+        id: usize,
+        name: String,
+        current_node_data: HashMap<String, String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let subtype: NodeType = match current_node_data.get("type").map(String::as_str) {
+            Some("input") => {
+                let belief_str = current_node_data
+                    .get("belief")
+                    .ok_or("belief not found while parsing input node")?;
+
+                let beliefs: Vec<f32> = belief_str
+                    .trim_matches(|c| c == '[' || c == ']')
+                    .trim()
+                    .split(',')
+                    .map(|s| s.trim().parse::<f32>())
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let belief: [f32; 2] = [beliefs[0], beliefs[1]];
+
+                NodeType::VariableNode {
+                    output: false,
+                    name: name.clone(),
+                    initial_belief: belief,
+                }
+            }
+            Some("output") => NodeType::VariableNode {
+                output: true,
+                name: name.clone(),
+                initial_belief: [0.0, 0.0],
+            },
+            _ => {
+                return Err("Node data has unknown type".into());
+            }
+        };
+
+        Ok(Self {
+            id: id as u32,
+            incident_edges: Vec::new(),
+            subtype,
+        })
     }
 
     /// Parses a GraphML `<node>` element into a `Node`.
@@ -252,12 +304,12 @@ impl Node {
             Some("input") => {
                 let belief_str = current_node_data.get("belief").ok_or("belief not found while parsing input node")?;
 
-                let beliefs: Vec<f64> = belief_str
+                let beliefs: Vec<f32> = belief_str
                     .trim_matches(|c| c == '[' || c == ']').trim()
-                    .split(',').map(|s| s.trim().parse::<f64>())
+                    .split(',').map(|s| s.trim().parse::<f32>())
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let belief: [f64; 2] = [beliefs[0], beliefs[1]];
+                let belief: [f32; 2] = [beliefs[0], beliefs[1]];
 
                 NodeType::VariableNode { output: false, name: name.clone(), initial_belief: belief }
             },
@@ -333,9 +385,8 @@ mod tests {
         let mut node = Node::new(1, NodeType::VariableNode { output: true, name: "node1".to_string(), initial_belief: [0.0, 0.0] });
         node.fill_in_prior(0.8);
         if let NodeType::VariableNode { initial_belief, .. } = node.get_subtype() {
-            println!("{:?}", initial_belief);
-            assert!((initial_belief[0] - 0.2).abs() < 1e-9);
-            assert!((initial_belief[1] - 0.8).abs() < 1e-9);
+            assert!((initial_belief[0] - 0.2).abs() < 1e-5);
+            assert!((initial_belief[1] - 0.8).abs() < 1e-5);
         } else {
             panic!("expected variable node");
         }

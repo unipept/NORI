@@ -3,8 +3,8 @@ use crate::array_utils::normalize;
 
 #[derive(Debug, Clone)]
 struct CTNode {
-    joint_above: Vec<f64>,
-    likelihood_below: Option<Vec<f64>>,
+    joint_above: Vec<f32>,
+    likelihood_below: Option<Vec<f32>>,
 }
 
 impl CTNode {
@@ -14,7 +14,7 @@ impl CTNode {
     /// 
     /// # Arguments
     /// * `joint_above` - A vector of probabilities for this node.
-    fn new(mut joint_above: Vec<f64>) -> Self {
+    fn new(mut joint_above: Vec<f32>) -> Self {
         normalize(&mut joint_above);
         Self {
             joint_above: joint_above,
@@ -44,11 +44,11 @@ impl CTNode {
     /// 
     /// # Returns
     /// A normalized probability vector representing the upward message.
-    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f64>) -> Vec<f64> {
+    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f32>) -> Vec<f32> {
         let likelihood = self.likelihood_below.as_ref().expect("Likelihood below is None!");
         let starting_point = other_joint_vector.len() - 1;
         let result = fft_convolve(
-            &other_joint_vector.iter().rev().cloned().collect::<Vec<f64>>(),
+            &other_joint_vector.iter().rev().cloned().collect::<Vec<f32>>(),
             likelihood,
         );
         let mut result = result[starting_point..starting_point + answer_size].to_vec();
@@ -60,14 +60,14 @@ impl CTNode {
     /// 
     /// # Returns
     /// A vector of probabilities from the likelihood below.
-    fn messages_up(&self) -> Vec<f64> {
+    fn messages_up(&self) -> Vec<f32> {
         self.likelihood_below.clone().expect("Likelihood below is None!")
     }
 }
 
 #[derive(Debug)]
 pub struct ConvolutionTree {
-    n_to_shared_likelihoods: Vec<f64>,
+    n_to_shared_likelihoods: Vec<f32>,
     log_length: usize,
     all_layers: Vec<Vec<CTNode>>,
     protein_layer: Vec<CTNode>,
@@ -83,8 +83,8 @@ impl ConvolutionTree {
     /// 
     /// # Returns
     /// A fully constructed ConvolutionTree with messages propagated backward.
-    pub fn new(n_to_shared_likelihoods: Vec<f64>, proteins: Vec<[f64; 2]>) -> Result<Self, Box<dyn std::error::Error>> {
-        let log_length = (proteins.len() as f64).log2().ceil() as usize;
+    pub fn new(n_to_shared_likelihoods: Vec<f32>, proteins: Vec<[f32; 2]>) -> Result<Self, Box<dyn std::error::Error>> {
+        let log_length = (proteins.len() as f32).log2().ceil() as usize;
         let mut tree = ConvolutionTree {
             n_to_shared_likelihoods,
             log_length,
@@ -105,7 +105,7 @@ impl ConvolutionTree {
     /// 
     /// # Arguments
     /// * `proteins` - A vector of protein probability distributions.
-    fn build_first_layer(&mut self, proteins: Vec<[f64; 2]>) {
+    fn build_first_layer(&mut self, proteins: Vec<[f32; 2]>) {
         let mut layer = proteins.into_iter().map(|arr| CTNode::new(arr.to_vec())).collect::<Vec<CTNode>>();
 
         // Pad with dummy nodes to make the length a power of 2
@@ -167,7 +167,7 @@ impl ConvolutionTree {
     /// 
     /// # Returns
     /// A probability vector representing the message to that protein.
-    pub fn message_to_variable(&self, prot_idx: usize) -> Vec<f64> {
+    pub fn message_to_variable(&self, prot_idx: usize) -> Vec<f32> {
         self.protein_layer[prot_idx].messages_up()
     }
 
@@ -175,7 +175,7 @@ impl ConvolutionTree {
     /// 
     /// # Returns
     /// A probability vector representing the message to the shared likelihood.
-    pub fn message_to_shared_likelihood(&self) -> Result<Vec<f64>, Box<dyn std::error::Error>>{
+    pub fn message_to_shared_likelihood(&self) -> Result<Vec<f32>, Box<dyn std::error::Error>>{
 
         // Extract the required range
         Ok(self.all_layers.last().ok_or("last() called on an empty vector")?[0].joint_above[..=self.n_proteins].to_vec())
@@ -191,7 +191,7 @@ impl ConvolutionTree {
 /// 
 /// # Returns
 /// A new vector representing the convolution of `a` and `b`.
-fn fft_convolve(a: &Vec<f64>, b: &Vec<f64>) -> Vec<f64> {
+fn fft_convolve(a: &Vec<f32>, b: &Vec<f32>) -> Vec<f32> {
     let len = a.len() + b.len() - 1;
     let fft_size = len.next_power_of_two();
 
@@ -199,18 +199,18 @@ fn fft_convolve(a: &Vec<f64>, b: &Vec<f64>) -> Vec<f64> {
     let fft = planner.plan_fft_forward(fft_size);
     let ifft = planner.plan_fft_inverse(fft_size);
 
-    let mut a_complex: Vec<Complex<f64>> = a.iter().map(|&x| Complex::new(x, 0.0)).collect();
-    let mut b_complex: Vec<Complex<f64>> = b.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    let mut a_complex: Vec<Complex<f32>> = a.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    let mut b_complex: Vec<Complex<f32>> = b.iter().map(|&x| Complex::new(x, 0.0)).collect();
     a_complex.resize(fft_size, Complex::zero());
     b_complex.resize(fft_size, Complex::zero());
 
     fft.process(&mut a_complex);
     fft.process(&mut b_complex);
 
-    let mut result_complex: Vec<Complex<f64>> = a_complex.iter().zip(&b_complex).map(|(x, y)| x * y).collect();
+    let mut result_complex: Vec<Complex<f32>> = a_complex.iter().zip(&b_complex).map(|(x, y)| x * y).collect();
     ifft.process(&mut result_complex);
 
-    result_complex.iter().take(len).map(|c| c.re / fft_size as f64).collect()
+    result_complex.iter().take(len).map(|c| c.re / fft_size as f32).collect()
 }
 
 
@@ -231,7 +231,7 @@ mod tests {
         let rhs = CTNode::new(vec![0.0, 1.0]);
         let node = CTNode::create_count_node(lhs, rhs);
         assert_eq!(node.joint_above.len(), 3);
-        let sum: f64 = node.joint_above.iter().sum();
+        let sum: f32 = node.joint_above.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
     }
 
@@ -241,7 +241,7 @@ mod tests {
         node.likelihood_below = Some(vec![0.5, 0.5]);
         let sibling_joint = vec![0.5, 0.5];
         let msg = node.message_up(2, &sibling_joint);
-        let sum: f64 = msg.iter().sum();
+        let sum: f32 = msg.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
 
         let msgs = node.messages_up();
@@ -257,7 +257,7 @@ mod tests {
         let tree = tree.unwrap();
 
         let msg = tree.message_to_variable(0);
-        assert!((msg.iter().sum::<f64>() - 1.0).abs() < 1e-10);
+        assert!((msg.iter().sum::<f32>() - 1.0).abs() < 1e-10);
     }
 
     #[test]
