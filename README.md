@@ -53,3 +53,28 @@ The function returns a CSV string with columns: `[node_name, belief_array]`.
 
 Graphs are provided as GraphML strings representing a bipartite graph with input and output nodes, and edges indicating noisy-OR relationships.
 
+### Example GraphML Structure
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="type" for="node"/>
+  <key id="belief" for="node"/>
+  <graph edgedefault="undirected">
+    <node id="input_1">
+      <data key="type">input</data>
+      <data key="belief">[0.001, 0.999]</data>
+    </node>
+    <node id="output_1">
+      <data key="type">output</data>
+    </node>
+    <edge source="input_1" target="output_1"/>
+  </graph>
+</graphml>
+```
+
+- **Nodes**: 
+  - `input` nodes have an ID and initial belief probabilities `[P(not_present), P(present)]`.
+  - `output` nodes have an ID and no belief (priors set via the `prior` parameter).
+- **Edges**: Undirected edges connect proteins to peptides they may produce.
+
