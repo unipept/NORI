@@ -53,6 +53,3 @@ The function returns a CSV string with columns: `[node_name, belief_array]`.
 
 Graphs are provided as GraphML strings representing a bipartite graph with input and output nodes, and edges indicating noisy-OR relationships.
 
-## License
-
-MIT
