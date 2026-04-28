@@ -1,4 +1,4 @@
-# Belief Propagation
+# NORI
 
 A Rust library for performing zero-lookahead belief propagation on bipartite graphs with noisy-OR  models, optimized for large-scale biological data analysis.
 
