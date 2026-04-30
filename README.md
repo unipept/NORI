@@ -1,12 +1,12 @@
-# Belief Propagation
+# NORI
 
-A Rust library for performing zero-lookahead belief propagation on bipartite graphs with noisy-OR  models, optimized for large-scale biological data analysis.
+A Rust library for performing zero-lookahead belief propagation on bipartite graphs with noisy-OR models, optimized for large-scale biological data analysis.
 
 ## Overview
 
 This repository contains:
 
-- **`belief_propagation/`**: The core Rust library implementing belief propagation algorithms.
+- **`nori/`**: The core Rust library implementing belief propagation algorithms.
 - **`benchmark_code/`**: Example code for benchmarking the library's performance.
 - **`input_data/`**: Sample GraphML files for testing and demonstration.
 
@@ -28,10 +28,23 @@ cargo build --release
 
 ## Usage
 
+### Running the benchmark example
+
+The `benchmark_code/` crate provides an example benchmark that executes `nori` over several parameter combinations.
+
+From the repository root:
+
+```bash
+cd benchmark_code
+cargo run --release
+```
+
+The benchmark reads the GraphML file at `../input_data/iPRG2016/peptide_protein_B.graphml` and prints progress information for each parameter combination.
+
 ### Loading and Running Belief Propagation
 
 ```rust
-use belief_propagation::{load_factor_graph, zero_lookahead_bp_from_graph};
+use nori::{load_factor_graph, zero_lookahead_bp_from_graph};
 
 let graphs = load_factor_graph(graphml_string)?;
 let result = zero_lookahead_bp_from_graph(&mut graphs, alpha, beta, regularized, prior, max_iter, tolerance)?;

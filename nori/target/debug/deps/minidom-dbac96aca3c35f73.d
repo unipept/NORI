@@ -1,0 +1,12 @@
+/workspaces/belief-propagation/belief-propagation/target/debug/deps/minidom-dbac96aca3c35f73.d: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/convert.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/element.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/error.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/namespaces.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/node.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/prefixes.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/tree_builder.rs
+
+/workspaces/belief-propagation/belief-propagation/target/debug/deps/libminidom-dbac96aca3c35f73.rmeta: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/convert.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/element.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/error.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/namespaces.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/node.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/prefixes.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/tree_builder.rs
+
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/lib.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/convert.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/element.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/error.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/namespaces.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/node.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/prefixes.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/minidom-0.15.2/src/tree_builder.rs:
