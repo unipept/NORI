@@ -1,1 +1,0 @@
-Copied<Flatten<std::iter::Map<std::slice::Iter<'_, Vec<f64>>, {closure@src/convolution_tree.rs:205:59: 205:66}>>>
