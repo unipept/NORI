@@ -1,0 +1,31 @@
+// For format details, see https://aka.ms/devcontainer.json
+{
+  "name": "Rust Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+
+  // Features to add to the dev container.
+  // This installs the Rust toolchain, rustup, cargo, and common components.
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "latest"
+    }
+  },
+
+  // Forward any ports your Rust app might use (optional)
+  // "forwardPorts": [8080],
+
+  // Run setup commands after the container is created (optional)
+  "postCreateCommand": "rustup component add clippy rustfmt",
+
+  // Optional editor customizations for VS Code
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb"
+      ]
+    }
+  }
+
+  // "remoteUser": "vscode" // default non-root user
+}
