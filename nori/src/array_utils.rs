@@ -61,7 +61,7 @@ pub fn sum_logs_batched(rows: &Vec<[f32; 2]>) -> [f32; 2] {
         prod1 *= row[1];
     }
 
-    [acc0 + prod0.ln(), acc1 + prod1.ln()]
+    [acc0 + ln_from_table(prod0), acc1 + ln_from_table(prod1)]
 }
 
 

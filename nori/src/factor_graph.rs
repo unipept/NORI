@@ -269,13 +269,14 @@ impl CTFactorGraph {
                 let mut new_variable_node = Node::new(next_node_id, node.get_subtype().clone());
                 next_node_id += 1;
                 node.set_subtype(NodeType::FactorNode { initial_belief: Vec::new() });
-                new_nodes.push(new_variable_node.clone());
 
                 let edge = Edge::new(next_edge_id, new_variable_node.get_id(), node.get_id(), node.neighbors_count(), 0, None);
                 self.edges.push(edge);
                 node.add_incident_edge(next_edge_id);
                 new_variable_node.add_incident_edge(next_edge_id);
                 next_edge_id += 1;
+
+                new_nodes.push(new_variable_node);
             }
         }
 

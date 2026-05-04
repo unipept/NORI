@@ -30,10 +30,9 @@ impl CTNode {
     /// 
     /// # Returns
     /// A new CTNode representing the combined distribution.
-    fn create_count_node(lhs: CTNode, rhs: CTNode) -> CTNode {
-        let joint_above = fft_convolve(&lhs.joint_above, &rhs.joint_above);
-        let node = CTNode::new(joint_above);
-        node
+    fn create_count_node(lhs: CTNode, rhs: CTNode, planner: &mut FftPlanner<f32>) -> CTNode {
+        let joint_above = fft_convolve(&lhs.joint_above, &rhs.joint_above, planner);
+        CTNode::new(joint_above)
     }
 
     /// Computes the upward message by convolving the likelihood below with a sibling's distribution.
@@ -44,12 +43,13 @@ impl CTNode {
     /// 
     /// # Returns
     /// A normalized probability vector representing the upward message.
-    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f32>) -> Vec<f32> {
+    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f32>, planner: &mut FftPlanner<f32>) -> Vec<f32> {
         let likelihood = self.likelihood_below.as_ref().expect("Likelihood below is None!");
         let starting_point = other_joint_vector.len() - 1;
         let result = fft_convolve(
             &other_joint_vector.iter().rev().cloned().collect::<Vec<f32>>(),
             likelihood,
+            planner
         );
         let mut result = result[starting_point..starting_point + answer_size].to_vec();
         normalize(&mut result);
@@ -65,13 +65,13 @@ impl CTNode {
     }
 }
 
-#[derive(Debug)]
 pub struct ConvolutionTree {
     n_to_shared_likelihoods: Vec<f32>,
     log_length: usize,
     all_layers: Vec<Vec<CTNode>>,
     protein_layer: Vec<CTNode>,
-    n_proteins: usize
+    n_proteins: usize,
+    planner: FftPlanner<f32>,
 }
 
 impl ConvolutionTree {
@@ -90,7 +90,8 @@ impl ConvolutionTree {
             log_length,
             all_layers: Vec::new(),
             protein_layer: Vec::new(),
-            n_proteins: proteins.len()
+            n_proteins: proteins.len(),
+            planner: FftPlanner::new()
         };
 
         tree.build_first_layer(proteins);
@@ -126,7 +127,7 @@ impl ConvolutionTree {
             for i in (0..most_recent_layer.len()).step_by(2) {
                 let left = most_recent_layer[i].clone();
                 let right = most_recent_layer[i + 1].clone();
-                new_layer.push(CTNode::create_count_node(left, right));
+                new_layer.push(CTNode::create_count_node(left, right, &mut self.planner));
             }
 
             self.all_layers.push(new_layer);
@@ -149,8 +150,8 @@ impl ConvolutionTree {
                 let right_parent = &self.all_layers[l-1][2*i + 1];
                 let node = &self.all_layers[l][i];
 
-                let likelihood_below_left = Some(node.message_up(left_parent.joint_above.len(), &right_parent.joint_above));
-                let likelihood_below_right = Some(node.message_up(right_parent.joint_above.len(), &left_parent.joint_above));
+                let likelihood_below_left = Some(node.message_up(left_parent.joint_above.len(), &right_parent.joint_above, &mut self.planner));
+                let likelihood_below_right = Some(node.message_up(right_parent.joint_above.len(), &left_parent.joint_above, &mut self.planner));
 
                 self.all_layers[l-1][2*i].likelihood_below = likelihood_below_left;
                 self.all_layers[l-1][2*i+1].likelihood_below = likelihood_below_right;
@@ -191,11 +192,10 @@ impl ConvolutionTree {
 /// 
 /// # Returns
 /// A new vector representing the convolution of `a` and `b`.
-fn fft_convolve(a: &Vec<f32>, b: &Vec<f32>) -> Vec<f32> {
+fn fft_convolve(a: &Vec<f32>, b: &Vec<f32>, planner: &mut FftPlanner<f32>) -> Vec<f32> {
     let len = a.len() + b.len() - 1;
     let fft_size = len.next_power_of_two();
 
-    let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_size);
     let ifft = planner.plan_fft_inverse(fft_size);
 
@@ -229,7 +229,8 @@ mod tests {
     fn test_create_count_node_convolution() {
         let lhs = CTNode::new(vec![1.0, 0.0]);
         let rhs = CTNode::new(vec![0.0, 1.0]);
-        let node = CTNode::create_count_node(lhs, rhs);
+        let mut planner = FftPlanner::new();
+        let node = CTNode::create_count_node(lhs, rhs, &mut planner);
         assert_eq!(node.joint_above.len(), 3);
         let sum: f32 = node.joint_above.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
@@ -240,7 +241,8 @@ mod tests {
         let mut node = CTNode::new(vec![0.5, 0.5]);
         node.likelihood_below = Some(vec![0.5, 0.5]);
         let sibling_joint = vec![0.5, 0.5];
-        let msg = node.message_up(2, &sibling_joint);
+        let mut planner = FftPlanner::new();
+        let msg = node.message_up(2, &sibling_joint, &mut planner);
         let sum: f32 = msg.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
 
@@ -278,7 +280,8 @@ mod tests {
     fn test_fft_convolve_basic() {
         let a = vec![1.0, 2.0];
         let b = vec![3.0, 4.0];
-        let result = fft_convolve(&a, &b);
+        let mut planner = FftPlanner::new();
+        let result = fft_convolve(&a, &b, &mut planner);
         let expected = vec![3.0, 10.0, 8.0];
         for (r, e) in result.iter().zip(expected.iter()) {
             assert!((r - e).abs() < 1e-8);

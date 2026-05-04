@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use minidom::Element;
 use serde::Serialize;
+use std::convert::TryInto;
 
 
 /// Defines the type of node in the factor graph with its initial beliefs.
@@ -215,20 +215,6 @@ impl Node {
         }
     }
 
-    /// Parses key-value data from a GraphML element.
-    ///
-    /// # Arguments
-    /// * `data` - GraphML `<data>` element.
-    ///
-    /// # Returns
-    /// A `(key, value)` pair.
-    fn parse_data(data: &Element) -> Result<(String, String), Box<dyn std::error::Error>> {
-        let key = data.attr("key").ok_or("key not found while parsing Node data")?.to_string();
-        let value = data.text();
-
-        Ok((key, value))
-    }
-
     /// Parses a GraphML node from a node id and data map.
     ///
     /// # Arguments
@@ -256,7 +242,10 @@ impl Node {
                     .map(|s| s.trim().parse::<f32>())
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let belief: [f32; 2] = [beliefs[0], beliefs[1]];
+                let belief: [f32; 2] = beliefs
+                .as_slice()
+                .try_into()
+                .map_err(|_| "belief must contain exactly 2 values")?;
 
                 NodeType::VariableNode {
                     output: false,
@@ -281,55 +270,12 @@ impl Node {
         })
     }
 
-    /// Parses a GraphML `<node>` element into a `Node`.
-    ///
-    /// # Arguments
-    /// * `node` - GraphML element to parse.
-    /// * `id` - Node ID.
-    ///
-    /// # Returns
-    /// A new `Node` or error if subtype is unknown.
-    pub fn parse_node(node: &Element, id: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        // Process a node
-        let name = node.attr("id").ok_or("id not found while parsing Node")?.to_string();
-    
-        // Initialize data for this node
-        let mut current_node_data = HashMap::new();
-        for data in node.children().filter(|d| d.name() == "data") {
-            let (data_key, data_val) = Self::parse_data(data)?;
-            current_node_data.insert(data_key, data_val);
-        }
-    
-        let subtype: NodeType = match current_node_data.get("type").map(String::as_str) {
-            Some("input") => {
-                let belief_str = current_node_data.get("belief").ok_or("belief not found while parsing input node")?;
-
-                let beliefs: Vec<f32> = belief_str
-                    .trim_matches(|c| c == '[' || c == ']').trim()
-                    .split(',').map(|s| s.trim().parse::<f32>())
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let belief: [f32; 2] = [beliefs[0], beliefs[1]];
-
-                NodeType::VariableNode { output: false, name: name.clone(), initial_belief: belief }
-            },
-            Some("output") => {
-                NodeType::VariableNode { output: true, name: name.clone(), initial_belief: [0.0, 0.0] }
-            },
-            _ => {
-                return Err("Node data has unknown type".into());
-            }
-        };
-
-        Ok(Self { id: id as u32, incident_edges: Vec::new(), subtype })
-    }
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minidom::Element;
 
     fn dummy_factor_node(id: usize) -> Node {
         Node::new(
@@ -413,28 +359,5 @@ mod tests {
             assert!(row[1] >= 1e-30);
             assert!((row[0] + row[1]) <= 1.0 + 1e-9);
         }
-    }
-
-    #[test]
-    fn test_parse_data() {
-        let xml: &str = r#"<data xmlns="ns" key="d0">0.5</data>"#;
-        let elem: Element = xml.parse().unwrap();
-        let node_data = Node::parse_data(&elem);
-        assert!(node_data.is_ok());
-        let (k, v) = node_data.unwrap();
-
-        assert_eq!(k, "d0");
-        assert_eq!(v, "0.5");
-    }
-
-    #[test]
-    fn test_parse_node_peptide() {
-        let xml: &str = r#"<node id="n0" xmlns="http://graphml.graphdrawing.org/xmlns">
-            <data key="type">input</data>
-            <data key="belief">[0.00437876, 0.99562124]</data>
-        </node>"#;
-        let elem: Element = xml.parse().unwrap();
-        let node = Node::parse_node(&elem, 7).unwrap();
-        assert_eq!(node.get_id(), 7);
     }
 }
