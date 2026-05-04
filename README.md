@@ -30,7 +30,7 @@ cargo build --release
 
 ### Running the benchmark example
 
-The `benchmark_code/` crate provides an example benchmark that executes `nori` over several parameter combinations.
+The `benchmark_code/` crate provides an example benchmark that executes NORI over several parameter combinations.
 
 From the repository root:
 
