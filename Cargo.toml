@@ -6,6 +6,9 @@ description = "Fast probabilistic inference for ambiguous observation-entity map
 license = "MIT"
 repository = "https://github.com/unipept/nori"
 readme = "README.md"
+exclude = [
+    "input_data/*",
+]
 
 [lib]
 name = "nori"
