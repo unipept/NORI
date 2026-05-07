@@ -1,8 +1,20 @@
-# NORI
 
-A Rust library for performing zero-lookahead belief propagation on bipartite graphs with noisy-OR models, optimized for large-scale biological data analysis.
+<br />
+<div align="left">
+  <p>
+  <img src="assets/nori_logo.svg#gh-light-mode-only" width="400">
+  <img src="assets/nori_logo_darkmode.svg#gh-dark-mode-only" width="400">
+  </p>
+
+  <p align="left">
+    Fast probabilistic inference for ambiguous observation–entity mappings
+    <br />
+  </p>
+</div>
 
 ## Overview
+
+A Rust library for performing zero-lookahead belief propagation on bipartite graphs with noisy-OR models, optimized for large-scale biological data analysis.
 
 This repository contains:
 
