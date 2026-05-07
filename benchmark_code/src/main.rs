@@ -30,7 +30,7 @@ fn benchmark() -> std::io::Result<()> {
                 );
 
                 let mut graphs = graphs_template.clone();
-                let csv = zero_lookahead_bp_from_graph(
+                let results = zero_lookahead_bp_from_graph(
                     &mut graphs,
                     alpha,
                     beta,
@@ -39,7 +39,7 @@ fn benchmark() -> std::io::Result<()> {
                     Some(10000),
                     Some(0.005),
                 );
-                println!("Result CSV output:\n{}", csv.unwrap());
+                println!("Result CSV output:\n{:?}", results.unwrap());
             }
         }
     }

@@ -7,7 +7,7 @@ mod messages;
 mod node;
 mod zero_lookahead_belief_propagation;
 
-use crate::{factor_graph::CTFactorGraph, zero_lookahead_belief_propagation::{run_belief_propagation, generate_csv, calibrate_all_subgraphs}};
+use crate::{factor_graph::CTFactorGraph, zero_lookahead_belief_propagation::calibrate_all_subgraphs};
 
 
 /// Runs belief propagation on a factor graph provided as a GraphML string.
@@ -28,8 +28,7 @@ use crate::{factor_graph::CTFactorGraph, zero_lookahead_belief_propagation::{run
 ///
 /// # Returns
 ///
-/// CSV string with one row per node containing columns:
-/// `[node_name, posterior_probability_1, node_category]`
+/// Vector of tuples containing node names and their belief distributions.
 pub fn zero_lookahead_bp(
     graph: String,
     alpha: f32,
@@ -38,11 +37,23 @@ pub fn zero_lookahead_bp(
     prior: f32,
     max_iter: Option<u32>,
     tolerance: Option<f32>
-) -> String {
+) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>> {
     let max_iter: u32 = max_iter.unwrap_or(10000);
     let tolerance: f32 = tolerance.unwrap_or(0.006);
     
-    run_belief_propagation(graph, alpha, beta, regularized, prior, max_iter, tolerance).unwrap()
+    let mut ct_factor_graph = CTFactorGraph::from_graphml(&graph)?;
+    ct_factor_graph.fill_in_factors(alpha, beta, regularized);
+    ct_factor_graph.fill_in_priors(prior);
+    ct_factor_graph.add_ct_nodes();
+    let ct_factor_graphs: Vec<CTFactorGraph> = ct_factor_graph.connected_components();
+
+    let results = calibrate_all_subgraphs(
+        &ct_factor_graphs,
+        max_iter,
+        tolerance
+    )?;
+
+    Ok(results)
 }
 
 
@@ -88,8 +99,7 @@ pub fn load_factor_graph(
 ///
 /// # Returns
 ///
-/// CSV string with one row per node containing columns:
-/// `[node_name, posterior_probability_1, node_category]`
+/// Vector of tuples containing node names and their belief distributions.
 pub fn zero_lookahead_bp_from_graph(
     graphs: &mut Vec<CTFactorGraph>,
     alpha: f32,
@@ -98,7 +108,7 @@ pub fn zero_lookahead_bp_from_graph(
     prior: f32,
     max_iter: Option<u32>,
     tolerance: Option<f32>
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>> {
     let max_iter: u32 = max_iter.unwrap_or(10000);
     let tolerance: f32 = tolerance.unwrap_or(0.006);
 
@@ -113,5 +123,5 @@ pub fn zero_lookahead_bp_from_graph(
         tolerance
     )?;
 
-    Ok(generate_csv(results)?)
+    Ok(results)
 }

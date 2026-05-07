@@ -1,0 +1,21 @@
+[package]
+name = "nori"
+version = "1.0.0"
+edition = "2024"
+description = "Fast probabilistic inference for ambiguous observation-entity mappings"
+license = "MIT"
+repository = "https://github.com/unipept/nori"
+readme = "README.md"
+exclude = [
+    "input_data/*",
+]
+
+[lib]
+name = "nori"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+quick-xml = "0.29"
+rustfft = { version = "6.2.0", features = ["wasm_simd"] }
+priority-queue = "2.7.0"
+ordered-float = "4.2"

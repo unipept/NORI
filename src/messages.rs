@@ -846,7 +846,7 @@ mod tests {
                 messages.priorities.push((node_id, neighbor_id), OrderedFloat(0.1));
             }
         }
-        messages.compute_priority(0,2,0);
+        let _ = messages.compute_priority(0,2,0);
         assert!(messages.priorities.peek().is_some());
     }
 
