@@ -18,7 +18,7 @@ A Rust library for performing zero-lookahead belief propagation on bipartite gra
 
 This repository contains:
 
-- **`nori/`**: The core Rust library implementing belief propagation algorithms.
+- **`src/`**: The core Rust code implementing belief propagation algorithms.
 - **`benchmark_code/`**: Example code for benchmarking the library's performance.
 - **`input_data/`**: Sample GraphML files for testing and demonstration.
 
