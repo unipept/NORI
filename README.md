@@ -30,12 +30,25 @@ This repository contains:
 
 ## Installation
 
-Ensure you have Rust installed. Clone the repository and build the library:
+### Option 1: Use the published crate
 
+In your `Cargo.toml`:
+
+```toml
+[dependencies]
+nori_inference = "1.0.0"
+```
+
+
+### Option 2: Use the local repository path
+
+Clone the repository, then point to it from your `Cargo.toml`:
 ```bash
 git clone <repository-url>
-cd nori
-cargo build --release
+```
+```toml
+[dependencies]
+nori_inference = { path = "../NORI" }
 ```
 
 ## Usage
