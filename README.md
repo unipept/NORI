@@ -34,7 +34,7 @@ Ensure you have Rust installed. Clone the repository and build the library:
 
 ```bash
 git clone <repository-url>
-cd belief-propagation
+cd nori
 cargo build --release
 ```
 
@@ -53,7 +53,7 @@ cargo run --release
 
 The benchmark reads the GraphML file at `../input_data/iPRG2016/peptide_protein_B.graphml` and prints progress information for each parameter combination.
 
-### Loading and Running Belief Propagation
+### Loading and Running Nori
 
 ```rust
 use nori::{load_factor_graph, zero_lookahead_bp_from_graph};
