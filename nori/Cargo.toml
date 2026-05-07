@@ -1,7 +1,11 @@
 [package]
 name = "nori"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.0"
+edition = "2024"
+description = "Fast probabilistic inference for ambiguous observation-entity mappings"
+license = "MIT"
+repository = "https://github.com/unipept/nori"
+readme = "README.md"
 
 [lib]
 name = "nori"
