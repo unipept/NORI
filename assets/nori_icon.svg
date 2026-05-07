@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 120 120" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <g transform="matrix(1,0,0,1,-440,-1529)">
+        <g transform="matrix(1,0,0,1,0,1089)">
+            <g id="logo">
+                <g id="Sushi">
+                    <g>
+                        <g id="Nori-bottom" serif:id="Nori bottom" transform="matrix(0.631579,0,0,0.8,162.105263,176)">
+                            <ellipse cx="535" cy="430" rx="95" ry="50" style="fill:rgb(31,45,42);"/>
+                        </g>
+                        <g id="Nori-top" serif:id="Nori top" transform="matrix(2.4,0,0,0.571429,-472,222.857143)">
+                            <rect x="380" y="450" width="50" height="70" style="fill:rgb(31,45,42);"/>
+                        </g>
+                    </g>
+                    <g transform="matrix(0.631579,0,0,0.8,162.105263,136)">
+                        <path d="M535,380C587.432,380 630,402.404 630,430C630,457.596 587.432,480 535,480C482.568,480 440,457.596 440,430C440,402.404 482.568,380 535,380ZM535,385.208C505.389,385.208 479.055,392.648 462.778,404.332C452.725,411.548 446.597,420.375 446.597,430C446.597,439.625 452.725,448.452 462.778,455.668C479.055,467.352 505.389,474.792 535,474.792C564.611,474.792 590.945,467.352 607.222,455.668C617.275,448.452 623.403,439.625 623.403,430C623.403,420.375 617.275,411.548 607.222,404.332C590.945,392.648 564.611,385.208 535,385.208Z" style="fill:rgb(31,45,42);"/>
+                    </g>
+                    <g id="Rice" transform="matrix(0.587719,0,0,0.716667,185.570175,171.833333)">
+                        <ellipse cx="535" cy="430" rx="95" ry="50" style="fill:rgb(245,245,245);"/>
+                    </g>
+                </g>
+                <g id="Graph">
+                    <path d="M480,494L520,494" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                    <path d="M480,480L520,466" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                    <path d="M480,494L520,480" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                    <path d="M480,466L520,480" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                    <g transform="matrix(0.8,0,0,0.8,188,138)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                    </g>
+                    <g transform="matrix(0.8,0,0,0.8,188,124)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                    </g>
+                    <g transform="matrix(0.8,0,0,0.8,188,110)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                    </g>
+                    <g transform="matrix(0.8,0,0,0.8,148,138)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                    </g>
+                    <g transform="matrix(0.8,0,0,0.8,148,124)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                    </g>
+                    <g transform="matrix(0.8,0,0,0.8,148,110)">
+                        <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

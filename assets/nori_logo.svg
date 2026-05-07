@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 349 120" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <g transform="matrix(1,0,0,1,-440,-440)">
+        <g id="logo">
+            <g id="Sushi">
+                <path d="M440,480C440,457.923 466.885,440 500,440C533.115,440 560,457.923 560,480L560,520C560,542.077 533.115,560 500,560C466.885,560 440,542.077 440,520L440,480ZM555.833,480C555.833,472.3 551.963,465.238 545.614,459.466C535.334,450.119 518.702,444.167 500,444.167C481.298,444.167 464.666,450.119 454.386,459.466C448.037,465.238 444.167,472.3 444.167,480L555.833,480Z" style="fill:rgb(31,45,42);"/>
+                <g id="Rice" transform="matrix(0.589474,0,0,0.72,184.631579,170.4)">
+                    <ellipse cx="535" cy="430" rx="95" ry="50" style="fill:rgb(245,245,245);"/>
+                </g>
+            </g>
+            <g id="Graph">
+                <path d="M480,494L520,494" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                <path d="M480,480L520,466" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                <path d="M480,494L520,480" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                <path d="M480,466L520,480" style="fill:none;stroke:rgb(74,85,104);stroke-width:1.46px;"/>
+                <g transform="matrix(0.8,0,0,0.8,188,138)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                </g>
+                <g transform="matrix(0.8,0,0,0.8,188,124)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                </g>
+                <g transform="matrix(0.8,0,0,0.8,188,110)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(47,133,90);"/>
+                </g>
+                <g transform="matrix(0.8,0,0,0.8,148,138)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                </g>
+                <g transform="matrix(0.8,0,0,0.8,148,124)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                </g>
+                <g transform="matrix(0.8,0,0,0.8,148,110)">
+                    <circle cx="415" cy="445" r="5" style="fill:rgb(43,108,176);"/>
+                </g>
+            </g>
+        </g>
+        <g transform="matrix(1,0,0,1,-43.92739,40.431444)">
+            <g transform="matrix(79.166667,0,0,79.166667,839.38989,488.30189)">
+            </g>
+            <text x="637.832px" y="488.302px" style="font-family:'HelveticaNeue', 'Helvetica Neue';font-size:79.167px;fill:rgb(31,45,42);">N<tspan x="698.157px 761.49px 818.886px " y="488.302px 488.302px 488.302px ">ORI</tspan></text>
+        </g>
+    </g>
+</svg>
