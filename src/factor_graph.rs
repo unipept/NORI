@@ -164,6 +164,14 @@ impl CTFactorGraph {
         Ok((source.to_string(), target.to_string()))
     }
 
+    /// Reads a string attribute from an XML element.
+    ///
+    /// # Arguments
+    /// * `element` - XML element from which to read the attribute.
+    /// * `key` - Attribute key to retrieve.
+    ///
+    /// # Returns
+    /// The string value of the attribute, or an error if the attribute is missing.
     fn get_attr(element: &BytesStart, key: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
         for attribute in element.attributes().with_checks(false) {
             let attribute = attribute?;
@@ -257,6 +265,7 @@ impl CTFactorGraph {
         Ok(graph)
     }
 
+    /// Adds factor nodes for all input nodes and connects them to their existing edges.
     pub fn add_factor_nodes(&mut self) {
         let mut next_node_id = self.node_count();
         let mut next_edge_id = self.edge_count();
@@ -396,7 +405,7 @@ impl CTFactorGraph {
                             next_edge_id += 1;
                             new_edges.push(edge);
                         } else {
-                            // Add Factor - Peptide node
+                            // Add factor-edge for input variable node
                             new_edges.push(self.get_edge(edge_id).copy_with_id(next_edge_id));
                             next_edge_id += 1;
                         }
@@ -533,6 +542,7 @@ mod tests {
 
     /* ----------------------------- Edge tests ----------------------------- */
 
+    /// Confirms that edge construction and getter methods work as expected.
     #[test]
     fn edge_new_and_getters() {
         let e = Edge::new(3, 1, 2, 4, 5, Some(10));
@@ -542,6 +552,7 @@ mod tests {
         assert_eq!(e.get_message_length(), Some(10));
     }
 
+    /// Verifies that edge endpoint indices can be updated correctly.
     #[test]
     fn edge_setters() {
         let mut e = Edge::new(0, 0, 1, 0, 0, None);
@@ -554,6 +565,7 @@ mod tests {
         assert_eq!(n2_in_n1, 9);
     }
 
+    /// Verifies that copying an edge with a new ID preserves all other properties.
     #[test]
     fn edge_copy_with_id() {
         let e = Edge::new(1, 2, 3, 4, 5, Some(6));
@@ -566,6 +578,7 @@ mod tests {
 
     /* -------------------------- Graph basic tests -------------------------- */
 
+    /// Confirms that graph creation and node/edge counting functions behave correctly.
     #[test]
     fn graph_new_and_counts() {
         let g = simple_graph();
@@ -574,6 +587,7 @@ mod tests {
         assert_eq!(g.edge_count(), 1);
     }
 
+    /// Checks graph getter methods for nodes and edges.
     #[test]
     fn graph_getters() {
         let g = simple_graph();
@@ -586,6 +600,7 @@ mod tests {
 
     /* ---------------------------- GraphML tests ---------------------------- */
 
+    /// Ensures GraphML parsing creates the expected graph structure.
     #[test]
     fn from_graphml_parses_graph() {
         let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
@@ -611,6 +626,7 @@ mod tests {
 
     /* ------------------------- Factor-node creation ------------------------ */
 
+    /// Validates factor node creation and edge insertion for input variables.
     #[test]
     fn add_factor_nodes_creates_factor_and_edge() {
         let mut g = simple_graph();
@@ -622,6 +638,7 @@ mod tests {
 
     /* --------------------------- Prior filling ----------------------------- */
 
+    /// Verifies that priors are correctly assigned to output variable nodes.
     #[test]
     fn fill_in_priors_sets_output_nodes() {
         let mut g = simple_graph();
@@ -636,6 +653,7 @@ mod tests {
 
     /* -------------------------- Factor CPD filling ------------------------- */
 
+    /// Confirms factor node probability tables are initialized by fill_in_factors.
     #[test]
     fn fill_in_factors_initializes_factor_nodes() {
         let mut g = simple_graph();
@@ -651,6 +669,7 @@ mod tests {
 
     /* -------------------------- Neighbor queries ---------------------------- */
 
+    /// Checks neighbor retrieval by node ID.
     #[test]
     fn get_neighbors_from_id() {
         let g = simple_graph();
@@ -659,6 +678,7 @@ mod tests {
         assert_eq!(neighbors, vec![1]);
     }
 
+    /// Ensures neighbor node ID mapping returns correct neighbor relationships.
     #[test]
     fn get_neighbor_node_and_neighbor_id() {
         let g = simple_graph();
@@ -671,6 +691,7 @@ mod tests {
 
     /* ---------------------- Convolution tree expansion --------------------- */
 
+    /// Verifies that convolution tree nodes are inserted for factors with multiple outputs.
     #[test]
     fn add_ct_nodes_adds_convolution_nodes() {
         let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
@@ -700,6 +721,7 @@ mod tests {
 
     /* ------------------------ Connected components ------------------------- */
 
+    /// Tests that connected_components splits the graph into separate components.
     #[test]
     fn connected_components_splits_graph() {
         let n0 = Node::new(

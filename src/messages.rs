@@ -53,10 +53,10 @@ impl NodeBelief {
         }
     }
 
-    /// Returns the belief values as a fixed-size array `[f32; 2]` for variable nodes (peptide or taxon).
+    /// Returns the belief values as a fixed-size array `[f32; 2]` for variable nodes.
     ///
     /// # Returns
-    /// * `Some([f32; 2])` if the node is a peptide or taxon node.
+    /// * `Some([f32; 2])` if the node is a variable node.
     /// * `None` if the node is a factor or convolution tree node.
     pub fn variable_values(&self) -> Option<[f32; 2]> {
         match self {
@@ -405,7 +405,7 @@ impl<'a> Messages<'a> {
             if node.is_output_node() {
                 let incoming_messages: &Vec<[f32; 2]> = self.msg_in[node.get_id()].get_messages();
                     
-                let initial_belief: [f32; 2] = get_initial_belief(node).variable_values().ok_or("Node should have PeptideBelief or TaxonBelief")?;
+                let initial_belief: [f32; 2] = get_initial_belief(node).variable_values().ok_or("Node should have a variable belief")?;
 
                 let sum_logs: [f32;2] = incoming_messages.iter()
                     .fold([0.0;2], |mut acc,  row| {acc[0] += row[0].ln(); acc[1] += row[1].ln(); acc});
@@ -432,8 +432,7 @@ impl<'a> Messages<'a> {
 
     /// Updates all outgoing messages from all nodes.
     ///
-    /// # Arguments
-    /// * `local_loops` - If true, update only local region around last max residual.
+    /// This method recomputes each message in the graph once.
     fn compute_update(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut checked_cts: HashSet<usize> = HashSet::new();
         
@@ -486,7 +485,7 @@ impl<'a> Messages<'a> {
         Ok(())
     }
 
-    /// Computes outgoing message for variable (peptide/taxon) nodes.
+    /// Computes outgoing message for variable nodes.
     ///
     /// # Arguments
     /// * `start_id` - ID of source node.
@@ -496,9 +495,9 @@ impl<'a> Messages<'a> {
     /// # Returns
     /// Normalized probability array.
     fn compute_out_message_variable(&mut self, start_id: usize, _end_id: usize, end_in_start_id: usize) -> [f32; 2] {
-        // Message to compute: Protein -> factor/convolution node, or peptide -> factor node
+        // Message to compute: variable node -> factor or convolution tree node
         
-        let node_belief: [f32; 2] = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a TaxonBelief or PeptideBelief");
+        let node_belief: [f32; 2] = self.current_beliefs[start_id].variable_values().expect("Start node belief should be a variable belief");
 
         if self.msg_in[start_id].get_message_count() <= 1 {
             return node_belief;
@@ -757,6 +756,7 @@ mod tests {
         CTFactorGraph::new(nodes, edges)
 }
 
+    /// Tests that initial beliefs are extracted correctly from node subtypes.
     #[test]
     fn test_get_initial_belief() {
         let variable_node = Node::new(
@@ -784,6 +784,7 @@ mod tests {
         }
     }
 
+    /// Validates NodeBelief value extraction for variable, factor, and convolution tree variants.
     #[test]
     fn test_nodebelief_values_and_factor_values() {
         let pb = NodeBelief::Variable([0.1,0.9]);
@@ -795,6 +796,7 @@ mod tests {
         assert_eq!(cb.values(), vec![1.0;4]);
     }
 
+    /// Runs zero-lookahead belief propagation on a minimal graph and verifies output shape.
     #[test]
     fn test_messages_zero_lookahead_bp() {
         let graph = create_minimal_graph();
@@ -808,6 +810,7 @@ mod tests {
         assert!((sum-1.0).abs()<1e-6);
     }
 
+    /// Ensures outgoing messages from variable nodes are normalized.
     #[test]
     fn test_compute_out_message_variable() {
         let graph = create_minimal_graph();
@@ -818,6 +821,7 @@ mod tests {
         assert!((s-1.0).abs()<1e-6);
     }
 
+    /// Ensures outgoing messages from factor nodes are normalized and valid.
     #[test]
     fn test_compute_out_message_factor() {
         let graph = create_minimal_graph();
@@ -830,6 +834,7 @@ mod tests {
         assert!((s-1.0).abs()<1e-6);
     }
 
+    /// Checks residual computation and total residual updates.
     #[test]
     fn test_compute_infinity_norm_residual_and_total_residuals() {
         let graph = create_minimal_graph();
@@ -840,6 +845,7 @@ mod tests {
         assert!(messages.total_residuals[1][1] > 0.0);
     }
 
+    /// Verifies that priority scheduling does not break with a populated priority queue.
     #[test]
     fn test_compute_priority() {
         let graph = create_minimal_graph();
@@ -853,6 +859,7 @@ mod tests {
         assert!(messages.priorities.peek().is_some());
     }
 
+    /// Tests single-message update logic and full-message update execution.
     #[test]
     fn test_single_message_update_and_compute_update() {
         let graph = create_minimal_graph();

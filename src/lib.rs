@@ -24,9 +24,9 @@ type BeliefResult = Vec<(String, Vec<f32>)>;
 /// * `alpha` - Noisy-OR factor alpha parameter.
 /// * `beta` - Noisy-OR factor beta parameter.
 /// * `regularized` - Whether to regularize factor tables to penalize large numbers of parents.
-/// * `prior` - Prior belief for taxon nodes.
+/// * `prior` - Prior belief for output variable nodes.
 /// * `max_iter` - Maximum number of belief propagation iterations.
-/// * `tol` - Tolerance threshold for message convergence.
+/// * `tolerance` - Tolerance threshold for message convergence.
 ///
 /// # Returns
 ///
@@ -61,20 +61,16 @@ pub fn zero_lookahead_bp(
 
 /// Load factor graph provided as a GraphML string.
 ///
-/// This function constructs the factor graph, fills in factor tables and priors and
-/// splits the graph into connected components.
+/// This function parses the GraphML into a factor graph, adds convolution tree nodes,
+/// and splits the graph into connected components.
 ///
 /// # Arguments
 ///
 /// * `graph` - GraphML representation of the factor graph.
-/// * `alpha` - Noisy-OR factor alpha parameter.
-/// * `beta` - Noisy-OR factor beta parameter.
-/// * `regularized` - Whether to regularize factor tables to penalize large numbers of parents.
-/// * `prior` - Prior belief for taxon nodes.
 ///
 /// # Returns
 ///
-/// Vector of graphs
+/// A vector of `CTFactorGraph` objects representing connected subgraphs.
 pub fn load_factor_graph(
     graph: &str,
 ) -> Result<Vec<CTFactorGraph>, Box<dyn std::error::Error>> {
@@ -163,7 +159,7 @@ pub fn zero_lookahead_bp_from_graph(
 /// * `alpha` - Noisy-OR factor alpha parameter.
 /// * `beta` - Noisy-OR factor beta parameter.
 /// * `regularized` - Whether to regularize factor tables to penalize large numbers of parents.
-/// * `prior` - Prior belief for taxon nodes.
+/// * `prior` - Prior belief for output variable nodes.
 /// * `max_iter` - Maximum number of belief propagation iterations. Defaults to 10,000 if `None`.
 /// * `tolerance` - Tolerance threshold for message convergence. Defaults to 0.006 if `None`.
 ///

@@ -218,6 +218,7 @@ fn fft_convolve(a: &[f32], b: &[f32], planner: &mut FftPlanner<f32>) -> Vec<f32>
 mod tests {
     use super::*;
 
+    /// Tests that CTNode normalizes its input distribution on creation.
     #[test]
     fn test_ctnode_new_normalizes() {
         let node = CTNode::new(vec![2.0, 2.0]);
@@ -225,6 +226,7 @@ mod tests {
         assert!((node.joint_above[1] - 0.5).abs() < 1e-10);
     }
 
+    /// Tests convolution of two child CTNodes produces a valid distribution.
     #[test]
     fn test_create_count_node_convolution() {
         let lhs = CTNode::new(vec![1.0, 0.0]);
@@ -236,6 +238,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-10);
     }
 
+    /// Tests upward message generation and retrieval from a CTNode.
     #[test]
     fn test_message_up_and_messages_up() {
         let mut node = CTNode::new(vec![0.5, 0.5]);
@@ -250,6 +253,7 @@ mod tests {
         assert_eq!(msgs, vec![0.5, 0.5]);
     }
 
+    /// Ensures ConvolutionTree can generate a message to a variable node.
     #[test]
     fn test_convolution_tree_message_to_variable() {
         let shared = vec![0.5, 0.5];
@@ -262,6 +266,7 @@ mod tests {
         assert!((msg.iter().sum::<f32>() - 1.0).abs() < 1e-10);
     }
 
+    /// Verifies the shared likelihood message has the expected length.
     #[test]
     fn test_convolution_tree_message_to_shared_likelihood() {
         let shared = vec![0.5, 0.5];
@@ -276,6 +281,7 @@ mod tests {
         assert_eq!(msg.len(), tree.n_proteins + 1);
     }
 
+    /// Checks FFT-based convolution produces correct results for a simple case.
     #[test]
     fn test_fft_convolve_basic() {
         let a = vec![1.0, 2.0];

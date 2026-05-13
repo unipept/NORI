@@ -123,6 +123,7 @@ pub fn avoid_underflow_arr(array: &mut [f32; 2]) {
 mod tests {
     use super::*;
 
+    /// Verifies that normalization scales a simple vector to sum to 1.
     #[test]
     fn test_normalize_basic() {
         let mut values = vec![1.0, 1.0, 2.0];
@@ -131,6 +132,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-12);
     }
 
+    /// Verifies that log normalization produces a valid probability distribution.
     #[test]
     fn test_log_normalize_basic() {
         let mut values = [0.0, 0.0];
@@ -139,6 +141,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-12);
     }
 
+    /// Verifies that underflow protection replaces values below the minimum threshold.
     #[test]
     fn test_avoid_underflow_replaces_small_values() {
         let mut values = vec![1e-40, 1e-20];

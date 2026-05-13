@@ -40,6 +40,7 @@ impl Node {
         Self { id: id as u32, incident_edges, subtype }
     }
 
+    /// Returns the variable node name, or an error if the node is not a variable.
     pub fn get_name(&self) -> Result<&str, Box<dyn std::error::Error>> {
         if let NodeType::Variable { name, .. } = self.get_subtype() {
             return Ok(name);
@@ -159,7 +160,7 @@ impl Node {
     /// Initializes factor CPD with noisy-OR parameters.
     ///
     /// # Arguments
-    /// * `alpha` - Peptide detection probability.
+    /// * `alpha` - Input activation probability.
     /// * `beta` - Noise parameter.
     /// * `regularized` - Whether to apply parent-count regularization.
     pub fn fill_in_factor(&mut self, degree: usize, alpha: f32, beta: f32, regularized: bool) {
@@ -279,6 +280,7 @@ impl Node {
 mod tests {
     use super::*;
 
+    /// Creates a dummy factor node for unit tests.
     fn dummy_factor_node(id: usize) -> Node {
         Node::new(
             id,
@@ -288,6 +290,7 @@ mod tests {
         )
     }
 
+    /// Tests node creation and basic getters for variable nodes.
     #[test]
     fn test_new_and_getters() {
         let node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.3, 0.7] });
@@ -295,6 +298,7 @@ mod tests {
         assert!(!node.is_factor_node());
     }
 
+    /// Verifies copy_with_id creates a new node with the updated ID.
     #[test]
     fn test_copy_with_id() {
         let node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.0, 1.0] });
@@ -302,12 +306,14 @@ mod tests {
         assert_eq!(copy.get_id(), 42);
     }
 
+    /// Checks creation of convolution tree nodes.
     #[test]
     fn test_new_convolution_node() {
         let node = Node::new_convolution_node(10);
         assert_eq!(node.get_id(), 10);
     }
 
+    /// Tests adding, retrieving, and setting incident edges on a node.
     #[test]
     fn test_incident_edges() {
         let mut node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.1, 0.9] });
@@ -321,6 +327,7 @@ mod tests {
         assert_eq!(incident_edges, vec![7usize, 8usize]);
     }
 
+    /// Verifies that node subtype updates and retrieval work properly.
     #[test]
     fn test_set_and_get_subtype() {
         let mut node = Node::new(1, NodeType::Factor { initial_belief: Vec::new() });
@@ -328,6 +335,7 @@ mod tests {
         assert!(matches!(node.get_subtype(), NodeType::Variable { .. }));
     }
 
+    /// Ensures fill_in_prior updates output variable priors correctly.
     #[test]
     fn test_fill_in_prior() {
         let mut node = Node::new(1, NodeType::Variable { output: true, name: "node1".to_string(), initial_belief: [0.0, 0.0] });
@@ -340,6 +348,7 @@ mod tests {
         }
     }
 
+    /// Checks that factor nodes receive a populated CPD when fill_in_factor is called.
     #[test]
     fn test_fill_in_factor() {
         let mut node = dummy_factor_node(2);
@@ -352,6 +361,7 @@ mod tests {
         }
     }
 
+    /// Verifies CPD normalization maintains probabilities and underflow protection.
     #[test]
     fn test_normalize_cpd() {
         let mut arr = vec![[2.0, 2.0], [1.0, 3.0]];
