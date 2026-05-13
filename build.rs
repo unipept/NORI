@@ -13,10 +13,10 @@ fn main() {
     let path = Path::new(&out_dir).join("log_table.rs");
     let mut file = File::create(&path).unwrap();
 
-    write!(file, "pub const LOG_TABLE: [f64; {}] = [\n", N).unwrap();
+    writeln!(file, "pub const LOG_TABLE: [f64; {}] = [", N).unwrap();
     for i in 0..N {
         let x = MIN_X + i as f64 * step;
-        writeln!(file, "    {:.16},", x.ln()).unwrap();
+        writeln!(file, "    {:.12},", x.ln()).unwrap();
     }
     writeln!(file, "];").unwrap();
 

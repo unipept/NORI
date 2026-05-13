@@ -17,7 +17,7 @@ impl CTNode {
     fn new(mut joint_above: Vec<f32>) -> Self {
         normalize(&mut joint_above);
         Self {
-            joint_above: joint_above,
+            joint_above,
             likelihood_below: None,
         }
     }
@@ -43,7 +43,7 @@ impl CTNode {
     /// 
     /// # Returns
     /// A normalized probability vector representing the upward message.
-    fn message_up(&self, answer_size: usize, other_joint_vector: &Vec<f32>, planner: &mut FftPlanner<f32>) -> Vec<f32> {
+    fn message_up(&self, answer_size: usize, other_joint_vector: &[f32], planner: &mut FftPlanner<f32>) -> Vec<f32> {
         let likelihood = self.likelihood_below.as_ref().expect("Likelihood below is None!");
         let starting_point = other_joint_vector.len() - 1;
         let result = fft_convolve(
@@ -192,7 +192,7 @@ impl ConvolutionTree {
 /// 
 /// # Returns
 /// A new vector representing the convolution of `a` and `b`.
-fn fft_convolve(a: &Vec<f32>, b: &Vec<f32>, planner: &mut FftPlanner<f32>) -> Vec<f32> {
+fn fft_convolve(a: &[f32], b: &[f32], planner: &mut FftPlanner<f32>) -> Vec<f32> {
     let len = a.len() + b.len() - 1;
     let fft_size = len.next_power_of_two();
 

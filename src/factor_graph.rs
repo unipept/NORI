@@ -2,10 +2,10 @@ use crate::node::{Node, NodeType};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 /// Represents an edge in a factor graph connecting two nodes.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Edge {
     id: u32,
     node1_id: u32,
@@ -24,6 +24,8 @@ impl Edge {
     /// * `id` - Unique identifier for the edge.
     /// * `node1_id` - ID of the first node connected by this edge.
     /// * `node2_id` - ID of the second node connected by this edge.
+    /// * `node1_in_node2_id` - Index of node1 in node2's neighbor list.
+    /// * `node2_in_node1_id` - Index of node2 in node1's neighbor list.
     /// * `message_length` - Optional message length associated with the edge. Can be `None` if not applicable.
     ///
     /// # Returns
@@ -86,7 +88,7 @@ impl Edge {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CTFactorGraph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -212,27 +214,22 @@ impl CTFactorGraph {
                     }
                     _ => {}
                 },
-                Ok(Event::Empty(ref e)) => match e.name().as_ref() {
-                    b"edge" => {
-                        let (source, target) = Self::parse_edge(e)?;
-                        let node1_id = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
-                        let node2_id = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
-                        let node1_degree = nodes[node1_id].neighbors_count();
-                        let node2_degree = nodes[node2_id].neighbors_count();
-                        let edge = Edge::new(next_edge_id, node1_id, node2_id, node2_degree, node1_degree, None);
-                        next_edge_id += 1;
+                Ok(Event::Empty(ref e)) if e.name().as_ref() == b"edge" => {
+                    let (source, target) = Self::parse_edge(e)?;
+                    let node1_id = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
+                    let node2_id = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
+                    let node1_degree = nodes[node1_id].neighbors_count();
+                    let node2_degree = nodes[node2_id].neighbors_count();
+                    let edge = Edge::new(next_edge_id, node1_id, node2_id, node2_degree, node1_degree, None);
+                    next_edge_id += 1;
 
-                        nodes[node1_id].add_incident_edge(edge.get_id());
-                        nodes[node2_id].add_incident_edge(edge.get_id());
-                        edges.push(edge);
-                    }
-                    _ => {}
+                    nodes[node1_id].add_incident_edge(edge.get_id());
+                    nodes[node2_id].add_incident_edge(edge.get_id());
+                    edges.push(edge);
                 },
-                Ok(Event::Text(e)) => {
-                    if current_data_key.is_some() {
-                        let text = e.unescape()?;
-                        current_data_value.push_str(&text);
-                    }
+                Ok(Event::Text(e)) if current_data_key.is_some() => {
+                    let text = e.unescape()?;
+                    current_data_value.push_str(&text);
                 }
                 Ok(Event::End(ref e)) => match e.name().as_ref() {
                     b"data" => {
@@ -268,7 +265,7 @@ impl CTFactorGraph {
             if node.is_input_node() {
                 let mut new_variable_node = Node::new(next_node_id, node.get_subtype().clone());
                 next_node_id += 1;
-                node.set_subtype(NodeType::FactorNode { initial_belief: Vec::new() });
+                node.set_subtype(NodeType::Factor { initial_belief: Vec::new() });
 
                 let edge = Edge::new(next_edge_id, new_variable_node.get_id(), node.get_id(), node.neighbors_count(), 0, None);
                 self.edges.push(edge);
@@ -369,9 +366,9 @@ impl CTFactorGraph {
     pub fn add_ct_nodes(&mut self) {
         // When creating the CTGraph and not just reading from a previously saved graph format, use this function to add the CT nodes
         let ct_node_count = self.nodes.iter().filter(|n| n.is_factor_node() && n.neighbors_count() > 2).count();
-        let mut new_nodes: Vec<Node> = Vec::with_capacity(&self.nodes.len() + ct_node_count);
+        let mut new_nodes: Vec<Node> = Vec::with_capacity(self.nodes.len() + ct_node_count);
         new_nodes.extend_from_slice(&self.nodes);
-        let mut new_edges: Vec<Edge> = Vec::with_capacity(&self.edges.len() + ct_node_count);
+        let mut new_edges: Vec<Edge> = Vec::with_capacity(self.edges.len() + ct_node_count);
 
         // Add nodes and keep track of edges to add/remove
         let mut next_edge_id: usize = 0;
@@ -510,7 +507,7 @@ mod tests {
     fn simple_graph() -> CTFactorGraph {
         let n0 = Node::new(
             0,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "A".into(),
                 initial_belief: [0.4, 0.6],
@@ -519,7 +516,7 @@ mod tests {
 
         let n1 = Node::new(
             1,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: true,
                 name: "B".into(),
                 initial_belief: [0.0, 0.0],
@@ -631,7 +628,7 @@ mod tests {
         g.fill_in_priors(0.7);
 
         for n in g.nodes.iter() {
-            if let NodeType::VariableNode { output: true, initial_belief, .. } = n.get_subtype() {
+            if let NodeType::Variable { output: true, initial_belief, .. } = n.get_subtype() {
                 assert!((initial_belief[1] - 0.7).abs() < 1e-9);
             }
         }
@@ -646,7 +643,7 @@ mod tests {
         g.fill_in_factors(0.9, 0.1, false);
 
         for n in g.nodes.iter() {
-            if let NodeType::FactorNode { initial_belief } = n.get_subtype() {
+            if let NodeType::Factor { initial_belief } = n.get_subtype() {
                 assert!(!initial_belief.is_empty());
             }
         }
@@ -707,7 +704,7 @@ mod tests {
     fn connected_components_splits_graph() {
         let n0 = Node::new(
             0,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "A".into(),
                 initial_belief: [0.5, 0.5],
@@ -715,7 +712,7 @@ mod tests {
         );
         let n1 = Node::new(
             1,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "B".into(),
                 initial_belief: [0.5, 0.5],

@@ -1,6 +1,9 @@
 use crate::factor_graph::CTFactorGraph;
 use crate::messages::Messages;
 
+/// Type alias for belief propagation results.
+type BeliefResult = Vec<(String, Vec<f32>)>;
+
 
 /// Calibrates multiple subgraphs (connected components) of a factor graph using loopy belief propagation.
 ///
@@ -20,7 +23,7 @@ pub fn calibrate_all_subgraphs(
     ct_factor_graphs: &Vec<CTFactorGraph>,
     max_iterations: u32,
     tolerance: f32
-) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>>{
+) -> Result<BeliefResult, Box<dyn std::error::Error>>{
     let mut results: Vec<(String, Vec<f32>)> = Vec::new();
 
     for subgraph in ct_factor_graphs {

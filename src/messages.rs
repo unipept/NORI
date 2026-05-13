@@ -8,15 +8,18 @@ use priority_queue::PriorityQueue;
 use ordered_float::OrderedFloat;
 use crate::array_utils::sum_logs_batched;
 
+/// Type alias for the result of zero lookahead belief propagation.
+type BeliefResult = Vec<(String, Vec<f32>)>;
+
 /// Represents belief values stored in different node types of the factor graph.
 #[derive(Debug, Clone)]
 pub enum NodeBelief {
     /// Belief for variable nodes: two probabilities (inactive, active).
-    VariableBelief([f32; 2]),
+    Variable([f32; 2]),
     /// Belief for factor nodes: list of probability pairs.
-    FactorBelief(Vec<[f32;2]>),
+    Factor(Vec<[f32;2]>),
     /// Belief placeholder for convolution tree nodes.
-    ConvolutionTreeBelief
+    ConvolutionTree
 }
 
 
@@ -29,9 +32,9 @@ pub enum NodeBelief {
 /// The corresponding `NodeBelief`.
 pub fn get_initial_belief(node: &Node) -> NodeBelief {
     match node.get_subtype() {
-        NodeType::VariableNode { initial_belief, .. } => NodeBelief::VariableBelief(*initial_belief),
-        NodeType::FactorNode { initial_belief, .. } => NodeBelief::FactorBelief(initial_belief.clone()),
-        NodeType::ConvolutionTreeNode { .. } => NodeBelief::ConvolutionTreeBelief
+        NodeType::Variable { initial_belief, .. } => NodeBelief::Variable(*initial_belief),
+        NodeType::Factor { initial_belief, .. } => NodeBelief::Factor(initial_belief.clone()),
+        NodeType::ConvolutionTree => NodeBelief::ConvolutionTree
     }
 }
 
@@ -44,9 +47,9 @@ impl NodeBelief {
     /// Vector of belief values.
     pub fn values(&self) -> Vec<f32> {
         match self {
-            NodeBelief::VariableBelief([a, b]) => vec![*a, *b],
-            NodeBelief::FactorBelief(vec) => vec.iter().flat_map(|arr| arr.to_vec()).collect(),
-            NodeBelief::ConvolutionTreeBelief => vec![1.0;4],
+            NodeBelief::Variable([a, b]) => vec![*a, *b],
+            NodeBelief::Factor(vec) => vec.iter().flat_map(|arr| arr.to_vec()).collect(),
+            NodeBelief::ConvolutionTree => vec![1.0;4],
         }
     }
 
@@ -57,7 +60,7 @@ impl NodeBelief {
     /// * `None` if the node is a factor or convolution tree node.
     pub fn variable_values(&self) -> Option<[f32; 2]> {
         match self {
-            NodeBelief::VariableBelief(belief) => Some(*belief),
+            NodeBelief::Variable(belief) => Some(*belief),
             _ => None
         }
     }
@@ -68,7 +71,7 @@ impl NodeBelief {
     /// `Some(Vec<[f32; 2]>)` if factor, otherwise `None`.
     pub fn factor_values(&self) -> Option<&Vec<[f32; 2]>> {
         match self {
-            NodeBelief::FactorBelief(vec) => Some(vec),
+            NodeBelief::Factor(vec) => Some(vec),
             _ => None
         }
     }
@@ -77,14 +80,14 @@ impl NodeBelief {
 
 #[derive(Clone, Debug)]
 pub enum MessagesInNode {
-    MessagesInVariable {
+    Variable {
         messages: Vec<[f32; 2]>,
     },
-    MessagesInFactor {
+    Factor {
         ct_message: Option<Vec<f32>>,
         variable_messages: Vec<[f32; 2]>,
     },
-    MessagesInCTree {
+    CTree {
         factor_message: Vec<f32>,
         variable_messages: Vec<[f32; 2]>,
     },
@@ -98,9 +101,9 @@ impl MessagesInNode {
     /// Reference to a vector of `[f32; 2]` messages.
     pub fn get_messages(&self) -> &Vec<[f32;2]> {
         match self {
-            MessagesInNode::MessagesInVariable { messages } => messages,
-            MessagesInNode::MessagesInFactor { variable_messages, .. } => variable_messages,
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages,
+            MessagesInNode::Variable { messages } => messages,
+            MessagesInNode::Factor { variable_messages, .. } => variable_messages,
+            MessagesInNode::CTree { variable_messages, .. } => variable_messages,
         }
     }
 
@@ -111,15 +114,15 @@ impl MessagesInNode {
     /// * `message` - New message to store.
     pub fn set_message(&mut self, neighbor_index: usize, message: [f32; 2]) {
         match self {
-            MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index] = message,
-            MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
+            MessagesInNode::Variable { messages } => messages[neighbor_index] = message,
+            MessagesInNode::Factor { variable_messages, ct_message } => {
                 if ct_message.is_none() {
                     variable_messages[neighbor_index] = message;
                 } else {
                     variable_messages[neighbor_index-1] = message;
                 }
             }
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages[neighbor_index-1] = message,
+            MessagesInNode::CTree { variable_messages, .. } => variable_messages[neighbor_index-1] = message,
         }
     }
 
@@ -132,15 +135,15 @@ impl MessagesInNode {
     /// Message as `[f32; 2]`.
     pub fn get_message(&self, neighbor_index: usize) -> [f32;2] {
         match self {
-            MessagesInNode::MessagesInVariable { messages } => messages[neighbor_index],
-            MessagesInNode::MessagesInFactor { variable_messages, ct_message } => {
+            MessagesInNode::Variable { messages } => messages[neighbor_index],
+            MessagesInNode::Factor { variable_messages, ct_message } => {
                 if ct_message.is_none() {
-                    return variable_messages[neighbor_index];
+                    variable_messages[neighbor_index]
                 } else {
-                    return variable_messages[neighbor_index - 1];
+                    variable_messages[neighbor_index - 1]
                 }
             },
-            MessagesInNode::MessagesInCTree { variable_messages, .. } => variable_messages[neighbor_index - 1],
+            MessagesInNode::CTree { variable_messages, .. } => variable_messages[neighbor_index - 1],
         }
     }
 
@@ -163,11 +166,7 @@ impl MessagesInNode {
         if message_index != 0 {
             return false;
         }
-        match self {
-            MessagesInNode::MessagesInCTree { .. } => true,
-            MessagesInNode::MessagesInFactor { ct_message: Some(_), .. } => true,
-            _ => false,
-        }
+        matches!(self, MessagesInNode::CTree { .. } | MessagesInNode::Factor { ct_message: Some(_), .. })
     }
 
     /// Retrieves the convolution tree message if it exists.
@@ -176,12 +175,13 @@ impl MessagesInNode {
     /// `Ok(&Vec<f32>)` if message exists, error otherwise.
     pub fn get_ct_message(&self) -> Result<&Vec<f32>, Box<dyn std::error::Error>> {
         match self {
-            MessagesInNode::MessagesInCTree { factor_message, .. } => Ok(factor_message),
-            MessagesInNode::MessagesInFactor { ct_message, .. } => {
+            MessagesInNode::CTree { factor_message, .. } => Ok(factor_message),
+            MessagesInNode::Factor { ct_message, .. } => {
                 if let Some(mes) = ct_message {
-                    return Ok(mes);
+                    Ok(mes)
+                } else {
+                    Err("Factor Node does not have a connected CTNode".into())
                 }
-                Err("Factor Node does not have a connected CTNode".into())
             },
             _ => Err("get_ct_message is only valid on MessageInCTree and MessagesInFactor".into())
         }
@@ -196,13 +196,13 @@ impl MessagesInNode {
     /// `Ok(())` on success, error if node type is incompatible.
     pub fn set_ct_message(&mut self, message: Vec<f32>) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            MessagesInNode::MessagesInCTree { factor_message, .. } => {
+            MessagesInNode::CTree { factor_message, .. } => {
                 *factor_message = message;
-                return Ok(());
+                Ok(())
             },
-            MessagesInNode::MessagesInFactor { ct_message, .. } => {
+            MessagesInNode::Factor { ct_message, .. } => {
                 *ct_message = Some(message);
-                return Ok(());
+                Ok(())
             },
             _ => Err("set_ct_message is only valid on MessageInCTree and MessagesInFactor".into())
         }
@@ -256,11 +256,11 @@ impl<'a> Messages<'a> {
         for node in ct_graph_in.get_nodes() {
 
             match node.get_subtype() {
-                NodeType::VariableNode { .. } => {
-                    msg_in.push(MessagesInNode::MessagesInVariable { messages: vec![[0.5, 0.5]; node.neighbors_count()] });
-                    msg_in_new.push(MessagesInNode::MessagesInVariable { messages: vec![[0.0, 0.0]; node.neighbors_count()]});
+                NodeType::Variable { .. } => {
+                    msg_in.push(MessagesInNode::Variable { messages: vec![[0.5, 0.5]; node.neighbors_count()] });
+                    msg_in_new.push(MessagesInNode::Variable { messages: vec![[0.0, 0.0]; node.neighbors_count()]});
                 },
-                NodeType::FactorNode { .. } => {
+                NodeType::Factor { .. } => {
                     let ct_message_length = ct_graph_in.get_edge(node.get_incident_edge(0)).get_message_length();
                     let mut variable_messages = vec![[0.5, 0.5]; node.neighbors_count()];
                     let mut variable_messages_new = vec![[0.0, 0.0]; node.neighbors_count()];
@@ -274,10 +274,10 @@ impl<'a> Messages<'a> {
                         ct_message_new = Some(vec![1.0; message_length]);
                     }
 
-                    msg_in.push(MessagesInNode::MessagesInFactor { variable_messages, ct_message });
-                    msg_in_new.push(MessagesInNode::MessagesInFactor { variable_messages: variable_messages_new, ct_message: ct_message_new });
+                    msg_in.push(MessagesInNode::Factor { variable_messages, ct_message });
+                    msg_in_new.push(MessagesInNode::Factor { variable_messages: variable_messages_new, ct_message: ct_message_new });
                 },
-                NodeType::ConvolutionTreeNode { .. } => {
+                NodeType::ConvolutionTree => {
                     let variable_messages = vec![[0.5, 0.5]; node.neighbors_count() - 1];
                     let variable_messages_new = vec![[0.0, 0.0]; node.neighbors_count() - 1];
 
@@ -287,8 +287,8 @@ impl<'a> Messages<'a> {
                     let factor_message = vec![1.0; factor_message_length];
                     let factor_message_new = vec![1.0; factor_message_length];
 
-                    msg_in.push(MessagesInNode::MessagesInCTree { variable_messages: variable_messages, factor_message: factor_message });
-                    msg_in_new.push(MessagesInNode::MessagesInCTree { variable_messages: variable_messages_new, factor_message: factor_message_new });
+                    msg_in.push(MessagesInNode::CTree { variable_messages, factor_message });
+                    msg_in_new.push(MessagesInNode::CTree { variable_messages: variable_messages_new, factor_message: factor_message_new });
                 }
             }
         }
@@ -300,6 +300,9 @@ impl<'a> Messages<'a> {
     }
 
     /// Adds a message priority to the scheduling queue.
+    ///
+    /// # Arguments
+    /// Adds a priority to the scheduling queue.
     ///
     /// # Arguments
     /// * `node_id` - Node ID of the message.
@@ -326,7 +329,7 @@ impl<'a> Messages<'a> {
     ///
     /// # Returns
     /// Final node beliefs as a list of value vectors.
-    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f32) -> Result<Vec<(String, Vec<f32>)>, Box<dyn std::error::Error>> {
+    pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f32) -> Result<BeliefResult, Box<dyn std::error::Error>> {
 
         let mut max_residual: f32 = f32::MAX;
 
@@ -375,7 +378,7 @@ impl<'a> Messages<'a> {
             // if the start node is a convolution tree, all the incoming messages of the neighbours can be changed.
             let start_node = self.graph.get_node(start_id);
             match start_node.get_subtype() {
-                NodeType::ConvolutionTreeNode { .. } => {
+                NodeType::ConvolutionTree => {
                     for neighbor_id in self.graph.get_neighbors(start_node) {
                         prev_changed.push(neighbor_id);
                         self.msg_in[neighbor_id] = self.msg_in_new[neighbor_id].clone();
@@ -411,7 +414,7 @@ impl<'a> Messages<'a> {
                 let mut logged_variable_marginal: [f32; 2] = [initial_belief[0].ln() + sum_logs[0], initial_belief[1].ln() + sum_logs[1]];
                 log_normalize(&mut logged_variable_marginal);
 
-                self.current_beliefs[node.get_id()] = NodeBelief::VariableBelief(logged_variable_marginal);
+                self.current_beliefs[node.get_id()] = NodeBelief::Variable(logged_variable_marginal);
             }
         }
 
@@ -424,7 +427,7 @@ impl<'a> Messages<'a> {
             })
             .collect();
 
-        Ok(output_beliefs?)
+        output_beliefs
     }
 
     /// Updates all outgoing messages from all nodes.
@@ -458,11 +461,11 @@ impl<'a> Messages<'a> {
         let (_, start_in_end_id): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, end_in_start_id);
 
         match start_node.get_subtype() {
-            NodeType::VariableNode { .. } => {
+            NodeType::Variable { .. } => {
                 let new_message = self.compute_out_message_variable(start_id, end_id, end_in_start_id);
                 self.msg_in_new[end_id].set_message(start_in_end_id, new_message);
             },
-            NodeType::FactorNode { .. } => {
+            NodeType::Factor { .. } => {
                 if self.graph.get_node(end_id).is_convolution_tree_node() {
                     let new_message = self.compute_out_message_factor_ctree(start_id, end_id, end_in_start_id)?;
                     self.msg_in_new[end_id].set_ct_message(new_message)?;
@@ -471,8 +474,8 @@ impl<'a> Messages<'a> {
                     self.msg_in_new[end_id].set_message(start_in_end_id, new_message);
                 }
             },
-            NodeType::ConvolutionTreeNode { .. } => 
-                if checked_cts.as_ref().map_or(true, |set| ! set.contains(&start_id)) {
+            NodeType::ConvolutionTree => 
+                if checked_cts.as_ref().is_none_or(|set| ! set.contains(&start_id)) {
                     self.compute_out_messages_ct_tree(start_id)?;
                     if let Some(set) = checked_cts.as_mut() {
                         set.insert(start_id);
@@ -531,7 +534,7 @@ impl<'a> Messages<'a> {
         let node_belief: &Vec<[f32;2]> = self.current_beliefs[start_id].factor_values().ok_or("factor_values called on a NodeBelief which is not a FactorBelief")?;
         
         let end_node = self.graph.get_node(end_id);
-        if let NodeType::VariableNode { output: false, .. } = end_node.get_subtype() {
+        if let NodeType::Variable { output: false, .. } = end_node.get_subtype() {
             // Factor -> input variable message: this messages is never used,.
             return Ok(self.msg_in[end_id].get_message(start_in_end_id));
         }
@@ -544,7 +547,7 @@ impl<'a> Messages<'a> {
         let mut out_message: Vec<f32> = node_belief.iter().map(|&a| a[0] * prod[0] + a[1] * prod[1]).collect();
         normalize(&mut out_message);
 
-        return Ok([out_message[0], out_message[1]]);
+        Ok([out_message[0], out_message[1]])
     }
 
     /// Computes outgoing message for factor nodes, for edges going to a ct tree node.
@@ -564,7 +567,7 @@ impl<'a> Messages<'a> {
         let mut out_message: Vec<f32> = node_belief.iter().map(|&a| a[0] * incoming_message[0] + a[1] * incoming_message[1]).collect();
         normalize(&mut out_message);
         
-        return Ok(out_message);
+        Ok(out_message)
     }
 
     /// Computes outgoing messages for convolution tree nodes.
@@ -606,7 +609,7 @@ impl<'a> Messages<'a> {
             
             for (protein_id, &protein) in prot_list.iter().enumerate() {
                 let (_, node_neighbor_index): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, protein_id+1);
-                self.msg_in_new[protein].set_message(node_neighbor_index, self.msg_in[protein].get_message(node_neighbor_index).clone());
+                self.msg_in_new[protein].set_message(node_neighbor_index, self.msg_in[protein].get_message(node_neighbor_index));
             }
 
             let new_message = self.msg_in[factor_id].get_ct_message()?.clone();
@@ -682,7 +685,7 @@ impl<'a> Messages<'a> {
         self.priorities.remove(&(end_id as u32, start_in_end_id as u32));
 
         for i in 0..end_node.neighbors_count() {
-            let (neighbor_id, end_in_neighbor_id) = self.graph.get_neighbor_node_and_neighbor_id(&end_node, i);
+            let (neighbor_id, end_in_neighbor_id) = self.graph.get_neighbor_node_and_neighbor_id(end_node, i);
             if neighbor_id != start_id {
                 let end_node_neighbor_count = end_node.neighbors_count();
                 let priority: f32 = self.graph
@@ -722,19 +725,19 @@ mod tests {
 
         let variable_node_1 = Node::new(
             0,
-            NodeType::VariableNode { name: "input_1".to_string(), initial_belief: [0.7, 0.3] , output: false }
+            NodeType::Variable { name: "input_1".to_string(), initial_belief: [0.7, 0.3] , output: false }
         );
         nodes.push(variable_node_1);
 
         let factor_node_1 = Node::new(
             1,
-            NodeType::FactorNode { initial_belief: vec![[0.6, 0.4], [0.2, 0.8]] }
+            NodeType::Factor { initial_belief: vec![[0.6, 0.4], [0.2, 0.8]] }
         );
         nodes.push(factor_node_1);
 
         let variable_node_2 = Node::new(
             2,
-            NodeType::VariableNode { name: "output_1".to_string(), initial_belief: [0.5, 0.5], output: true }
+            NodeType::Variable { name: "output_1".to_string(), initial_belief: [0.5, 0.5], output: true }
         );
         nodes.push(variable_node_2);
 
@@ -758,10 +761,10 @@ mod tests {
     fn test_get_initial_belief() {
         let variable_node = Node::new(
             0,
-            NodeType::VariableNode { name: "variable_1".to_string(), initial_belief: [0.6, 0.4], output: false }
+            NodeType::Variable { name: "variable_1".to_string(), initial_belief: [0.6, 0.4], output: false }
         );
 
-        if let NodeType::VariableNode { initial_belief, .. } = variable_node.get_subtype() {
+        if let NodeType::Variable { initial_belief, .. } = variable_node.get_subtype() {
             assert!((initial_belief[0] - 0.6).abs() < 1e-10);
             assert!((initial_belief[1] - 0.4).abs() < 1e-10);
         } else {
@@ -770,10 +773,10 @@ mod tests {
 
         let factor_node = Node::new(
             1,
-            NodeType::FactorNode { initial_belief: vec![[0.5, 0.5], [0.3, 0.7]] }
+            NodeType::Factor { initial_belief: vec![[0.5, 0.5], [0.3, 0.7]] }
         );
 
-        if let NodeType::FactorNode { initial_belief } = factor_node.get_subtype() {
+        if let NodeType::Factor { initial_belief } = factor_node.get_subtype() {
             assert!((initial_belief[0][0] - 0.5).abs() < 1e-10);
             assert!((initial_belief[1][1] - 0.7).abs() < 1e-10);
         } else {
@@ -783,12 +786,12 @@ mod tests {
 
     #[test]
     fn test_nodebelief_values_and_factor_values() {
-        let pb = NodeBelief::VariableBelief([0.1,0.9]);
+        let pb = NodeBelief::Variable([0.1,0.9]);
         assert_eq!(pb.values(), vec![0.1,0.9]);
-        let fb = NodeBelief::FactorBelief(vec![[0.2,0.8]]);
+        let fb = NodeBelief::Factor(vec![[0.2,0.8]]);
         assert_eq!(fb.values(), vec![0.2,0.8]);
         assert_eq!(fb.factor_values(), Some(&vec![[0.2,0.8]]));
-        let cb = NodeBelief::ConvolutionTreeBelief;
+        let cb = NodeBelief::ConvolutionTree;
         assert_eq!(cb.values(), vec![1.0;4]);
     }
 
