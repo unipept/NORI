@@ -1,6 +1,6 @@
 [package]
 name = "nori_inference"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Fast probabilistic inference for ambiguous observation-entity mappings"
 license = "MIT"
