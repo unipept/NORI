@@ -32,7 +32,7 @@ pub fn ln_from_table(x: f32) -> f32 {
 ///
 /// # Returns
 /// * `[f32; 2]` where each component is the batched sum of logarithms across the corresponding column.
-pub fn sum_logs_batched(rows: &Vec<[f32; 2]>) -> [f32; 2] {
+pub fn sum_logs_batched(rows: &[[f32; 2]]) -> [f32; 2] {
 
     let mut acc0 = 0.0f32;
     let mut acc1 = 0.0f32;
@@ -71,7 +71,7 @@ pub fn sum_logs_batched(rows: &Vec<[f32; 2]>) -> [f32; 2] {
 /// 
 /// # Arguments
 /// * `array` - A mutable reference to a vector of `f32` values.
-pub fn normalize(array: &mut Vec<f32>) {
+pub fn normalize(array: &mut [f32]) {
     let sum: f32 = array.iter().sum();
     for val in array.iter_mut() {
         *val /= sum;
@@ -102,7 +102,7 @@ pub fn log_normalize(array: &mut [f32; 2]) {
 /// 
 /// # Arguments
 /// * `array` - A mutable reference to a vector of `f32` values.
-pub fn avoid_underflow(array: &mut Vec<f32>) {
+pub fn avoid_underflow(array: &mut [f32]) {
     array.iter_mut().for_each(|x| if *x < 1e-30 { *x = 1e-30 });
 }
 
@@ -112,9 +112,9 @@ pub fn avoid_underflow(array: &mut Vec<f32>) {
 /// # Arguments
 /// * `array` - Mutable reference to a `[f32; 2]` array.
 pub fn avoid_underflow_arr(array: &mut [f32; 2]) {
-    for i in 0..2 {
-        if array[i] < 1e-30 {
-            array[i] = 1e-30;
+    for item in array.iter_mut().take(2) {
+        if *item < 1e-30 {
+            *item = 1e-30;
         }
     }
 }
@@ -123,6 +123,7 @@ pub fn avoid_underflow_arr(array: &mut [f32; 2]) {
 mod tests {
     use super::*;
 
+    /// Verifies that normalization scales a simple vector to sum to 1.
     #[test]
     fn test_normalize_basic() {
         let mut values = vec![1.0, 1.0, 2.0];
@@ -131,6 +132,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-12);
     }
 
+    /// Verifies that log normalization produces a valid probability distribution.
     #[test]
     fn test_log_normalize_basic() {
         let mut values = [0.0, 0.0];
@@ -139,6 +141,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-12);
     }
 
+    /// Verifies that underflow protection replaces values below the minimum threshold.
     #[test]
     fn test_avoid_underflow_replaces_small_values() {
         let mut values = vec![1e-40, 1e-20];

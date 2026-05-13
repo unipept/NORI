@@ -11,7 +11,7 @@ fn benchmark() -> std::io::Result<()> {
     let betas = [0.01, 0.2, 0.4];
     let alphas = [0.1, 0.25, 0.5, 0.65, 0.8];
 
-    let graphs_template = load_factor_graph(input).unwrap();
+    let mut graphs_template = load_factor_graph(&input).unwrap();
     println!(
         "Benchmark: running zero-lookahead belief propagation with {} alpha x {} beta x {} prior combinations...",
         alphas.len(), betas.len(), priors.len()
@@ -29,9 +29,9 @@ fn benchmark() -> std::io::Result<()> {
                     run_count, total_runs, alpha, beta, prior
                 );
 
-                let mut graphs = graphs_template.clone();
+                // let mut graphs = graphs_template.clone();
                 let results = zero_lookahead_bp_from_graph(
-                    &mut graphs,
+                    &mut graphs_template,
                     alpha,
                     beta,
                     true,

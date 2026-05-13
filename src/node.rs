@@ -1,22 +1,22 @@
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::convert::TryInto;
 
 
 /// Defines the type of node in the factor graph with its initial beliefs.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeType {
     /// Variable node with prior probabilities.
-    VariableNode { output: bool, name: String, initial_belief: [f32; 2] },
+    Variable { output: bool, name: String, initial_belief: [f32; 2] },
     /// Factor node with CPD.
-    FactorNode { initial_belief: Vec<[f32; 2]> },
+    Factor { initial_belief: Vec<[f32; 2]> },
     /// Convolution tree node.
-    ConvolutionTreeNode
+    ConvolutionTree
 }
 
 
 /// Represents a node in the factor graph with its attributes and connections.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     id: u32,
     incident_edges: Vec<u32>,
@@ -40,8 +40,9 @@ impl Node {
         Self { id: id as u32, incident_edges, subtype }
     }
 
+    /// Returns the variable node name, or an error if the node is not a variable.
     pub fn get_name(&self) -> Result<&str, Box<dyn std::error::Error>> {
-        if let NodeType::VariableNode { name, .. } = self.get_subtype() {
+        if let NodeType::Variable { name, .. } = self.get_subtype() {
             return Ok(name);
         }
         Err("get_name called on a factor/convolution node".into())
@@ -68,7 +69,7 @@ impl Node {
     /// # Returns
     /// A new convolution tree node.
     pub fn new_convolution_node(id: usize) -> Self {
-        Self { id: id as u32, incident_edges: Vec::new(), subtype: NodeType::ConvolutionTreeNode }
+        Self { id: id as u32, incident_edges: Vec::new(), subtype: NodeType::ConvolutionTree }
     }
 
     /// Adds an incident edge to the node.
@@ -128,20 +129,22 @@ impl Node {
 
     /// Checks if the node is a factor node.
     pub fn is_factor_node(&self) -> bool {
-        matches!(self.subtype, NodeType::FactorNode { .. })
+        matches!(self.subtype, NodeType::Factor { .. })
     }
 
+    /// Checks if the node is an output node.
     pub fn is_output_node(&self) -> bool {
-        matches!(self.subtype, NodeType::VariableNode { output: true , .. })
+        matches!(self.subtype, NodeType::Variable { output: true , .. })
     }
 
+    /// Checks if the node is an input node.
     pub fn is_input_node(&self) -> bool {
-        matches!(self.subtype, NodeType::VariableNode { output: false , .. })
+        matches!(self.subtype, NodeType::Variable { output: false , .. })
     }
 
     /// Checks if the node is a convolution node.
     pub fn is_convolution_tree_node(&self) -> bool {
-        matches!(self.subtype, NodeType::ConvolutionTreeNode { .. })
+        matches!(self.subtype, NodeType::ConvolutionTree)
     }
 
     /// Updates prior belief for variable nodes.
@@ -149,15 +152,15 @@ impl Node {
     /// # Arguments
     /// * `prior` - Probability to assign as active.
     pub fn fill_in_prior(&mut self, prior: f32) {
-        if let NodeType::VariableNode { output: true , name, .. } = &self.subtype {
-            self.subtype = NodeType::VariableNode { output: true, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
+        if let NodeType::Variable { output: true , name, .. } = &self.subtype {
+            self.subtype = NodeType::Variable { output: true, name: name.to_string(), initial_belief: [1.0 - prior, prior] };
         }
     }
 
     /// Initializes factor CPD with noisy-OR parameters.
     ///
     /// # Arguments
-    /// * `alpha` - Peptide detection probability.
+    /// * `alpha` - Input activation probability.
     /// * `beta` - Noise parameter.
     /// * `regularized` - Whether to apply parent-count regularization.
     pub fn fill_in_factor(&mut self, degree: usize, alpha: f32, beta: f32, regularized: bool) {
@@ -190,7 +193,7 @@ impl Node {
         let initial_belief = if regularized { cpd_array_regularized } else { cpd_array };
         
         // Add factor to the node's attributes
-        self.subtype = NodeType::FactorNode { initial_belief };
+        self.subtype = NodeType::Factor { initial_belief };
     }
 
     /// Normalizes CPD values in-place.
@@ -199,7 +202,7 @@ impl Node {
     /// * `arr` - CPD array.
     /// * `sum` - Normalization constant.
     /// * `avoid_underflow` - If true, enforce minimum values.
-    fn normalize_cpd(arr: &mut Vec<[f32; 2]>, sum: f32, avoid_underflow: bool) {
+    fn normalize_cpd(arr: &mut [[f32; 2]], sum: f32, avoid_underflow: bool) {
         for cpd in arr.iter_mut() {
             cpd[0] /= sum;
             cpd[1] /= sum;
@@ -247,13 +250,13 @@ impl Node {
                 .try_into()
                 .map_err(|_| "belief must contain exactly 2 values")?;
 
-                NodeType::VariableNode {
+                NodeType::Variable {
                     output: false,
                     name: name.clone(),
                     initial_belief: belief,
                 }
             }
-            Some("output") => NodeType::VariableNode {
+            Some("output") => NodeType::Variable {
                 output: true,
                 name: name.clone(),
                 initial_belief: [0.0, 0.0],
@@ -277,38 +280,43 @@ impl Node {
 mod tests {
     use super::*;
 
+    /// Creates a dummy factor node for unit tests.
     fn dummy_factor_node(id: usize) -> Node {
         Node::new(
             id,
-            NodeType::FactorNode {
+            NodeType::Factor {
                 initial_belief: Vec::new(),
             },
         )
     }
 
+    /// Tests node creation and basic getters for variable nodes.
     #[test]
     fn test_new_and_getters() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.3, 0.7] });
+        let node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.3, 0.7] });
         assert_eq!(node.get_id(), 1);
         assert!(!node.is_factor_node());
     }
 
+    /// Verifies copy_with_id creates a new node with the updated ID.
     #[test]
     fn test_copy_with_id() {
-        let node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.0, 1.0] });
+        let node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.0, 1.0] });
         let copy = node.copy_with_id(42);
         assert_eq!(copy.get_id(), 42);
     }
 
+    /// Checks creation of convolution tree nodes.
     #[test]
     fn test_new_convolution_node() {
         let node = Node::new_convolution_node(10);
         assert_eq!(node.get_id(), 10);
     }
 
+    /// Tests adding, retrieving, and setting incident edges on a node.
     #[test]
     fn test_incident_edges() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.1, 0.9] });
+        let mut node = Node::new(1, NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.1, 0.9] });
         node.add_incident_edge(5);
         assert_eq!(node.neighbors_count(), 1);
         assert_eq!(node.get_incident_edge(0), 5);
@@ -319,18 +327,20 @@ mod tests {
         assert_eq!(incident_edges, vec![7usize, 8usize]);
     }
 
+    /// Verifies that node subtype updates and retrieval work properly.
     #[test]
     fn test_set_and_get_subtype() {
-        let mut node = Node::new(1, NodeType::FactorNode { initial_belief: Vec::new() });
-        node.set_subtype(NodeType::VariableNode { output: false, name: "node1".to_string(), initial_belief: [0.5, 0.5] });
-        assert!(matches!(node.get_subtype(), NodeType::VariableNode { .. }));
+        let mut node = Node::new(1, NodeType::Factor { initial_belief: Vec::new() });
+        node.set_subtype(NodeType::Variable { output: false, name: "node1".to_string(), initial_belief: [0.5, 0.5] });
+        assert!(matches!(node.get_subtype(), NodeType::Variable { .. }));
     }
 
+    /// Ensures fill_in_prior updates output variable priors correctly.
     #[test]
     fn test_fill_in_prior() {
-        let mut node = Node::new(1, NodeType::VariableNode { output: true, name: "node1".to_string(), initial_belief: [0.0, 0.0] });
+        let mut node = Node::new(1, NodeType::Variable { output: true, name: "node1".to_string(), initial_belief: [0.0, 0.0] });
         node.fill_in_prior(0.8);
-        if let NodeType::VariableNode { initial_belief, .. } = node.get_subtype() {
+        if let NodeType::Variable { initial_belief, .. } = node.get_subtype() {
             assert!((initial_belief[0] - 0.2).abs() < 1e-5);
             assert!((initial_belief[1] - 0.8).abs() < 1e-5);
         } else {
@@ -338,18 +348,20 @@ mod tests {
         }
     }
 
+    /// Checks that factor nodes receive a populated CPD when fill_in_factor is called.
     #[test]
     fn test_fill_in_factor() {
         let mut node = dummy_factor_node(2);
         node.add_incident_edge(0);
         node.fill_in_factor(1, 0.5, 0.1, false);
-        if let NodeType::FactorNode { initial_belief, .. } = node.get_subtype() {
+        if let NodeType::Factor { initial_belief, .. } = node.get_subtype() {
             assert!(!initial_belief.is_empty());
         } else {
             panic!("expected FactorNode");
         }
     }
 
+    /// Verifies CPD normalization maintains probabilities and underflow protection.
     #[test]
     fn test_normalize_cpd() {
         let mut arr = vec![[2.0, 2.0], [1.0, 3.0]];

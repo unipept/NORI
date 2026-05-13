@@ -2,10 +2,10 @@ use crate::node::{Node, NodeType};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 /// Represents an edge in a factor graph connecting two nodes.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Edge {
     id: u32,
     node1_id: u32,
@@ -24,6 +24,8 @@ impl Edge {
     /// * `id` - Unique identifier for the edge.
     /// * `node1_id` - ID of the first node connected by this edge.
     /// * `node2_id` - ID of the second node connected by this edge.
+    /// * `node1_in_node2_id` - Index of node1 in node2's neighbor list.
+    /// * `node2_in_node1_id` - Index of node2 in node1's neighbor list.
     /// * `message_length` - Optional message length associated with the edge. Can be `None` if not applicable.
     ///
     /// # Returns
@@ -86,7 +88,7 @@ impl Edge {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CTFactorGraph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -162,6 +164,14 @@ impl CTFactorGraph {
         Ok((source.to_string(), target.to_string()))
     }
 
+    /// Reads a string attribute from an XML element.
+    ///
+    /// # Arguments
+    /// * `element` - XML element from which to read the attribute.
+    /// * `key` - Attribute key to retrieve.
+    ///
+    /// # Returns
+    /// The string value of the attribute, or an error if the attribute is missing.
     fn get_attr(element: &BytesStart, key: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
         for attribute in element.attributes().with_checks(false) {
             let attribute = attribute?;
@@ -212,27 +222,22 @@ impl CTFactorGraph {
                     }
                     _ => {}
                 },
-                Ok(Event::Empty(ref e)) => match e.name().as_ref() {
-                    b"edge" => {
-                        let (source, target) = Self::parse_edge(e)?;
-                        let node1_id = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
-                        let node2_id = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
-                        let node1_degree = nodes[node1_id].neighbors_count();
-                        let node2_degree = nodes[node2_id].neighbors_count();
-                        let edge = Edge::new(next_edge_id, node1_id, node2_id, node2_degree, node1_degree, None);
-                        next_edge_id += 1;
+                Ok(Event::Empty(ref e)) if e.name().as_ref() == b"edge" => {
+                    let (source, target) = Self::parse_edge(e)?;
+                    let node1_id = *node_map.get(&source).ok_or("Source node of edge not present in graph")?;
+                    let node2_id = *node_map.get(&target).ok_or("Target node of edge not present in graph")?;
+                    let node1_degree = nodes[node1_id].neighbors_count();
+                    let node2_degree = nodes[node2_id].neighbors_count();
+                    let edge = Edge::new(next_edge_id, node1_id, node2_id, node2_degree, node1_degree, None);
+                    next_edge_id += 1;
 
-                        nodes[node1_id].add_incident_edge(edge.get_id());
-                        nodes[node2_id].add_incident_edge(edge.get_id());
-                        edges.push(edge);
-                    }
-                    _ => {}
+                    nodes[node1_id].add_incident_edge(edge.get_id());
+                    nodes[node2_id].add_incident_edge(edge.get_id());
+                    edges.push(edge);
                 },
-                Ok(Event::Text(e)) => {
-                    if current_data_key.is_some() {
-                        let text = e.unescape()?;
-                        current_data_value.push_str(&text);
-                    }
+                Ok(Event::Text(e)) if current_data_key.is_some() => {
+                    let text = e.unescape()?;
+                    current_data_value.push_str(&text);
                 }
                 Ok(Event::End(ref e)) => match e.name().as_ref() {
                     b"data" => {
@@ -260,6 +265,7 @@ impl CTFactorGraph {
         Ok(graph)
     }
 
+    /// Adds factor nodes for all input nodes and connects them to their existing edges.
     pub fn add_factor_nodes(&mut self) {
         let mut next_node_id = self.node_count();
         let mut next_edge_id = self.edge_count();
@@ -268,7 +274,7 @@ impl CTFactorGraph {
             if node.is_input_node() {
                 let mut new_variable_node = Node::new(next_node_id, node.get_subtype().clone());
                 next_node_id += 1;
-                node.set_subtype(NodeType::FactorNode { initial_belief: Vec::new() });
+                node.set_subtype(NodeType::Factor { initial_belief: Vec::new() });
 
                 let edge = Edge::new(next_edge_id, new_variable_node.get_id(), node.get_id(), node.neighbors_count(), 0, None);
                 self.edges.push(edge);
@@ -369,9 +375,9 @@ impl CTFactorGraph {
     pub fn add_ct_nodes(&mut self) {
         // When creating the CTGraph and not just reading from a previously saved graph format, use this function to add the CT nodes
         let ct_node_count = self.nodes.iter().filter(|n| n.is_factor_node() && n.neighbors_count() > 2).count();
-        let mut new_nodes: Vec<Node> = Vec::with_capacity(&self.nodes.len() + ct_node_count);
+        let mut new_nodes: Vec<Node> = Vec::with_capacity(self.nodes.len() + ct_node_count);
         new_nodes.extend_from_slice(&self.nodes);
-        let mut new_edges: Vec<Edge> = Vec::with_capacity(&self.edges.len() + ct_node_count);
+        let mut new_edges: Vec<Edge> = Vec::with_capacity(self.edges.len() + ct_node_count);
 
         // Add nodes and keep track of edges to add/remove
         let mut next_edge_id: usize = 0;
@@ -399,7 +405,7 @@ impl CTFactorGraph {
                             next_edge_id += 1;
                             new_edges.push(edge);
                         } else {
-                            // Add Factor - Peptide node
+                            // Add factor-edge for input variable node
                             new_edges.push(self.get_edge(edge_id).copy_with_id(next_edge_id));
                             next_edge_id += 1;
                         }
@@ -510,7 +516,7 @@ mod tests {
     fn simple_graph() -> CTFactorGraph {
         let n0 = Node::new(
             0,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "A".into(),
                 initial_belief: [0.4, 0.6],
@@ -519,7 +525,7 @@ mod tests {
 
         let n1 = Node::new(
             1,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: true,
                 name: "B".into(),
                 initial_belief: [0.0, 0.0],
@@ -536,6 +542,7 @@ mod tests {
 
     /* ----------------------------- Edge tests ----------------------------- */
 
+    /// Confirms that edge construction and getter methods work as expected.
     #[test]
     fn edge_new_and_getters() {
         let e = Edge::new(3, 1, 2, 4, 5, Some(10));
@@ -545,6 +552,7 @@ mod tests {
         assert_eq!(e.get_message_length(), Some(10));
     }
 
+    /// Verifies that edge endpoint indices can be updated correctly.
     #[test]
     fn edge_setters() {
         let mut e = Edge::new(0, 0, 1, 0, 0, None);
@@ -557,6 +565,7 @@ mod tests {
         assert_eq!(n2_in_n1, 9);
     }
 
+    /// Verifies that copying an edge with a new ID preserves all other properties.
     #[test]
     fn edge_copy_with_id() {
         let e = Edge::new(1, 2, 3, 4, 5, Some(6));
@@ -569,6 +578,7 @@ mod tests {
 
     /* -------------------------- Graph basic tests -------------------------- */
 
+    /// Confirms that graph creation and node/edge counting functions behave correctly.
     #[test]
     fn graph_new_and_counts() {
         let g = simple_graph();
@@ -577,6 +587,7 @@ mod tests {
         assert_eq!(g.edge_count(), 1);
     }
 
+    /// Checks graph getter methods for nodes and edges.
     #[test]
     fn graph_getters() {
         let g = simple_graph();
@@ -589,6 +600,7 @@ mod tests {
 
     /* ---------------------------- GraphML tests ---------------------------- */
 
+    /// Ensures GraphML parsing creates the expected graph structure.
     #[test]
     fn from_graphml_parses_graph() {
         let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
@@ -614,6 +626,7 @@ mod tests {
 
     /* ------------------------- Factor-node creation ------------------------ */
 
+    /// Validates factor node creation and edge insertion for input variables.
     #[test]
     fn add_factor_nodes_creates_factor_and_edge() {
         let mut g = simple_graph();
@@ -625,13 +638,14 @@ mod tests {
 
     /* --------------------------- Prior filling ----------------------------- */
 
+    /// Verifies that priors are correctly assigned to output variable nodes.
     #[test]
     fn fill_in_priors_sets_output_nodes() {
         let mut g = simple_graph();
         g.fill_in_priors(0.7);
 
         for n in g.nodes.iter() {
-            if let NodeType::VariableNode { output: true, initial_belief, .. } = n.get_subtype() {
+            if let NodeType::Variable { output: true, initial_belief, .. } = n.get_subtype() {
                 assert!((initial_belief[1] - 0.7).abs() < 1e-9);
             }
         }
@@ -639,6 +653,7 @@ mod tests {
 
     /* -------------------------- Factor CPD filling ------------------------- */
 
+    /// Confirms factor node probability tables are initialized by fill_in_factors.
     #[test]
     fn fill_in_factors_initializes_factor_nodes() {
         let mut g = simple_graph();
@@ -646,7 +661,7 @@ mod tests {
         g.fill_in_factors(0.9, 0.1, false);
 
         for n in g.nodes.iter() {
-            if let NodeType::FactorNode { initial_belief } = n.get_subtype() {
+            if let NodeType::Factor { initial_belief } = n.get_subtype() {
                 assert!(!initial_belief.is_empty());
             }
         }
@@ -654,6 +669,7 @@ mod tests {
 
     /* -------------------------- Neighbor queries ---------------------------- */
 
+    /// Checks neighbor retrieval by node ID.
     #[test]
     fn get_neighbors_from_id() {
         let g = simple_graph();
@@ -662,6 +678,7 @@ mod tests {
         assert_eq!(neighbors, vec![1]);
     }
 
+    /// Ensures neighbor node ID mapping returns correct neighbor relationships.
     #[test]
     fn get_neighbor_node_and_neighbor_id() {
         let g = simple_graph();
@@ -674,6 +691,7 @@ mod tests {
 
     /* ---------------------- Convolution tree expansion --------------------- */
 
+    /// Verifies that convolution tree nodes are inserted for factors with multiple outputs.
     #[test]
     fn add_ct_nodes_adds_convolution_nodes() {
         let graphml = r#"<?xml version='1.0' encoding='utf-8'?>
@@ -703,11 +721,12 @@ mod tests {
 
     /* ------------------------ Connected components ------------------------- */
 
+    /// Tests that connected_components splits the graph into separate components.
     #[test]
     fn connected_components_splits_graph() {
         let n0 = Node::new(
             0,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "A".into(),
                 initial_belief: [0.5, 0.5],
@@ -715,7 +734,7 @@ mod tests {
         );
         let n1 = Node::new(
             1,
-            NodeType::VariableNode {
+            NodeType::Variable {
                 output: false,
                 name: "B".into(),
                 initial_belief: [0.5, 0.5],
