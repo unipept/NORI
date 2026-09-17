@@ -19,4 +19,4 @@ bincode = "1"
 quick-xml = "0.29"
 rustfft = { version = "6.2.0", features = ["wasm_simd"] }
 priority-queue = "2.7.0"
-ordered-float = "4.2"
+ordered-float = "5.5"
