@@ -288,7 +288,7 @@ mod tests {
         let b = vec![3.0, 4.0];
         let mut planner = FftPlanner::new();
         let result = fft_convolve(&a, &b, &mut planner);
-        let expected = vec![3.0, 10.0, 8.0];
+        let expected = [3.0, 10.0, 8.0];
         for (r, e) in result.iter().zip(expected.iter()) {
             assert!((r - e).abs() < 1e-8);
         }

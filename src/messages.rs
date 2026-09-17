@@ -866,7 +866,7 @@ mod tests {
         let mut messages = Messages::new(&graph);
         let mut checked = HashSet::new();
         messages.single_message_update(0,1,0,Some(&mut checked)).unwrap();
-        assert!(checked.is_empty() || checked.contains(&0)==false);
+        assert!(checked.is_empty() || !checked.contains(&0));
         messages.compute_update().unwrap(); 
     }
 }
