@@ -4,7 +4,6 @@
 # Rust build artifacts
 /target/
 **/target/
-Cargo.lock
 
 # Devcontainer lock file
 .devcontainer/devcontainer-lock.json
