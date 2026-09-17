@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Rust build artifacts
+/target/
+**/target/
+Cargo.lock
+
+# Devcontainer lock file
+.devcontainer/devcontainer-lock.json
+
+# Local data and benchmark directories (not published on GitHub)
+/graphs/
+/input_data/
+/benchmark_code/
+/peptonizer_benchmark_py/
+/peptonizer_benchmark_rs/
+/peptonizer_benchmark_rs_human/
+/profiler/
