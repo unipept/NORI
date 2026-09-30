@@ -510,6 +510,9 @@ impl<'a> Messages<'a> {
         let msg_from_end = incoming_messages[end_in_start_id];
         out_message_log[0] -= ln_from_table(msg_from_end[0]);
         out_message_log[1] -= ln_from_table(msg_from_end[1]);
+        // Multiply by the node's own belief (the prior), as in the single-neighbour case above.
+        out_message_log[0] += node_belief[0].ln();
+        out_message_log[1] += node_belief[1].ln();
 
         log_normalize(&mut out_message_log);
 
