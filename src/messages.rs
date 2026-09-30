@@ -587,7 +587,9 @@ impl<'a> Messages<'a> {
 
         let old_prot_prob_list: &Vec<[f32; 2]> = self.msg_in_log[start_id].get_messages();
 
-        if old_shared_likelihoods != shared_likelihoods && 
+        // Recompute the tree when any incoming message changed: the shared likelihood from the factor
+        // or the message from at least one variable node.
+        if old_shared_likelihoods != shared_likelihoods ||
             prot_prob_list.iter().zip(old_prot_prob_list.iter()).any(|(a, b)| a[0] != b[0]) {
             let convolution_tree = ConvolutionTree::new(shared_likelihoods.clone(), prot_prob_list.clone())?;
 
