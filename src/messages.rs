@@ -509,8 +509,10 @@ impl<'a> Messages<'a> {
     ///
     /// Every outgoing message of the tree is a sum of products that contain each incoming variable message once. If
     /// incoming message `i` changed by at most a factor `exp(d_i)` per entry, every outgoing message changes by at
-    /// most a factor `exp(sum_i d_i)`. So `sum_i d_i <= ct_rebuild_tolerance` guarantees that a rebuild would not
-    /// change any outgoing message by more than the tolerance.
+    /// most a factor `exp(sum_i d_i)` before normalization. The normalization constant can change by the same factor
+    /// in the opposite direction, so a normalized outgoing message changes by at most a factor `exp(2 * sum_i d_i)`.
+    /// So `2 * sum_i d_i <= ct_rebuild_tolerance` guarantees that a rebuild would not change any outgoing message by
+    /// more than the tolerance.
     fn convolution_tree_needs_rebuild(&self, ct_id: usize) -> Result<bool, Box<dyn std::error::Error>> {
         let Some(last_build) = &self.ct_last_build[ct_id] else {
             return Ok(true);
@@ -522,7 +524,7 @@ impl<'a> Messages<'a> {
         let mut change = 0.0;
         for (new, old) in self.msg_in[ct_id].get_messages().iter().zip(&last_build.variable_messages) {
             change += (new[0] / old[0]).ln().abs().max((new[1] / old[1]).ln().abs());
-            if change > self.ct_rebuild_tolerance {
+            if 2.0 * change > self.ct_rebuild_tolerance {
                 return Ok(true);
             }
         }
