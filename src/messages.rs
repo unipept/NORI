@@ -214,8 +214,9 @@ impl MessagesInNode {
 pub struct Messages<'a> {
     graph: &'a CTFactorGraph,
     priorities: PriorityQueue<(u32, u32), OrderedFloat<f32>>,
-    // Keeps track of residuals for duos of directed edges, indexed by [end_node][id of start node in end neighbours][id of neighbour in end node]
-    total_residuals: Vec<Vec<f32>>, 
+    // For each directed edge (node -> neighbour), indexed by [node][id of neighbour in node]: the summed residuals of
+    // the messages into `node` from its other neighbours since the message to that neighbour was last computed
+    pending_residuals: Vec<Vec<f32>>,
     // Maps a node ID onto its current belief value
     current_beliefs: Vec<NodeBelief>, 
     // incoming messages for each node [end node][neighbour id]
@@ -237,14 +238,9 @@ impl<'a> Messages<'a> {
     pub fn new(ct_graph_in: &CTFactorGraph) -> Messages<'_> {        
         let priorities = PriorityQueue::new();
 
-        let mut total_residuals: Vec<Vec<f32>> = Vec::with_capacity(ct_graph_in.node_count());
-        for node in ct_graph_in.get_nodes() {
-
-            let total_residual_node: Vec<f32> = vec![0.0; node.neighbors_count() * node.neighbors_count()];
-
-            total_residuals.push(total_residual_node);
-
-        }
+        let pending_residuals: Vec<Vec<f32>> = ct_graph_in.get_nodes().iter()
+            .map(|node| vec![0.0; node.neighbors_count()])
+            .collect();
 
         let mut current_beliefs: Vec<NodeBelief> = Vec::with_capacity(ct_graph_in.node_count());
         for node in ct_graph_in.get_nodes() {
@@ -295,7 +291,7 @@ impl<'a> Messages<'a> {
 
         let msg_in_log = msg_in.clone();
 
-        Messages { graph: ct_graph_in, priorities, total_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log }
+        Messages { graph: ct_graph_in, priorities, pending_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log }
 
     }
 
@@ -659,20 +655,16 @@ impl<'a> Messages<'a> {
     /// * `end_in_start_id` - Neighbor index of destination in source.
     /// * `current_residual` - Redidual to add to message
     fn compute_total_residuals(&mut self, start_id: usize, end_id: usize, start_in_end_id: usize, current_residual: f32) {
-        let start_node = self.graph.get_node(start_id);
         let end_node = self.graph.get_node(end_id);
         let (_, end_in_start_id) = self.graph.get_neighbor_node_and_neighbor_id(end_node, start_in_end_id);
 
-        let neighbor_count_start = start_node.neighbors_count();
-        for (i, neighbor_id) in self.graph.get_neighbors(start_node).enumerate() {
-            if neighbor_id != end_id {
-                self.total_residuals[start_id][i * neighbor_count_start + end_in_start_id] = 0.0;
-            }
-        }
+        // The message start -> end was just recomputed, so no residual is pending for it anymore.
+        self.pending_residuals[start_id][end_in_start_id] = 0.0;
 
+        // The changed message into `end` affects all messages from `end` to its other neighbours.
         for (i, neighbor_id) in self.graph.get_neighbors(end_node).enumerate() {
             if neighbor_id != start_id {
-                self.total_residuals[end_id][start_in_end_id * end_node.neighbors_count() + i] += current_residual;
+                self.pending_residuals[end_id][i] += current_residual;
             }
         }
     }
@@ -691,17 +683,7 @@ impl<'a> Messages<'a> {
         for i in 0..end_node.neighbors_count() {
             let (neighbor_id, end_in_neighbor_id) = self.graph.get_neighbor_node_and_neighbor_id(end_node, i);
             if neighbor_id != start_id {
-                let end_node_neighbor_count = end_node.neighbors_count();
-                let priority: f32 = self.graph
-                    .get_neighbors(end_node)
-                    .enumerate()
-                    .map(|(j, sum_run)| {
-                        if sum_run != neighbor_id { 
-                            self.total_residuals[end_id][j * end_node_neighbor_count + i]
-                        } else { 
-                            0.0
-                        }
-                    }).sum();
+                let priority: f32 = self.pending_residuals[end_id][i];
 
                 if self.priorities.change_priority(&(neighbor_id as u32, end_in_neighbor_id as u32), OrderedFloat(priority)).is_none() {
                     self.priorities.push((neighbor_id as u32, end_in_neighbor_id as u32), OrderedFloat(priority));
@@ -841,13 +823,13 @@ mod tests {
 
     /// Checks residual computation and total residual updates.
     #[test]
-    fn test_compute_infinity_norm_residual_and_total_residuals() {
+    fn test_compute_infinity_norm_residual_and_pending_residuals() {
         let graph = create_minimal_graph();
         let mut messages = Messages::new(&graph);
         let residual = messages.compute_infinity_norm_residual(0,0);
         assert!(residual >= 0.0);
         messages.compute_total_residuals(0,1,0,0.1);
-        assert!(messages.total_residuals[1][1] > 0.0);
+        assert!(messages.pending_residuals[1][1] > 0.0);
     }
 
     /// Verifies that priority scheduling does not break with a populated priority queue.
