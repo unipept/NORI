@@ -2,21 +2,24 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-const N: usize = 1024;
-const MIN_X: f64 = 1e-10;
-const MAX_X: f64 = 1.0;
+/// Number of mantissa bits used to index the log table: the table has `2^LOG_TABLE_BITS + 1` entries.
+const LOG_TABLE_BITS: u32 = 10;
 
 fn main() {
-    let step = (MAX_X - MIN_X) / (N as f64 - 1.0);
-
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let path = Path::new(&out_dir).join("log_table.rs");
     let mut file = File::create(&path).unwrap();
 
-    writeln!(file, "pub const LOG_TABLE: [f64; {}] = [", N).unwrap();
-    for i in 0..N {
-        let x = MIN_X + i as f64 * step;
-        writeln!(file, "    {:.12},", x.ln()).unwrap();
+    // LOG_TABLE[i] = ln(1 + i / 2^LOG_TABLE_BITS): ln of a float mantissa at evenly spaced points in [1, 2].
+    // The last entry (ln 2) lets `ln_from_table` interpolate in the last interval without a bounds check.
+    let size = 1usize << LOG_TABLE_BITS;
+    writeln!(file, "pub const LOG_TABLE_BITS: u32 = {LOG_TABLE_BITS};").unwrap();
+    // The last entry is ln 2, which clippy would otherwise flag as an approximation of `LN_2`.
+    writeln!(file, "#[allow(clippy::approx_constant)]").unwrap();
+    writeln!(file, "pub const LOG_TABLE: [f32; {}] = [", size + 1).unwrap();
+    for i in 0..=size {
+        let mantissa = 1.0 + i as f64 / size as f64;
+        writeln!(file, "    {:?},", mantissa.ln() as f32).unwrap();
     }
     writeln!(file, "];").unwrap();
 
