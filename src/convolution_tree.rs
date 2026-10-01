@@ -1,5 +1,14 @@
+use std::cell::RefCell;
 use rustfft::{FftPlanner, num_complex::Complex, num_traits::Zero};
 use crate::array_utils::normalize;
+
+/// Vectors up to this length are convolved directly instead of with an FFT, which is faster for short vectors.
+const DIRECT_CONVOLUTION_MAX_LEN: usize = 64;
+
+thread_local! {
+    /// One FFT planner per thread, so FFT plans are reused by all convolution trees.
+    static FFT_PLANNER: RefCell<FftPlanner<f32>> = RefCell::new(FftPlanner::new());
+}
 
 #[derive(Debug, Clone)]
 struct CTNode {
@@ -30,8 +39,8 @@ impl CTNode {
     /// 
     /// # Returns
     /// A new CTNode representing the combined distribution.
-    fn create_count_node(lhs: CTNode, rhs: CTNode, planner: &mut FftPlanner<f32>) -> CTNode {
-        let joint_above = fft_convolve(&lhs.joint_above, &rhs.joint_above, planner);
+    fn create_count_node(lhs: &CTNode, rhs: &CTNode) -> CTNode {
+        let joint_above = convolve(&lhs.joint_above, &rhs.joint_above);
         CTNode::new(joint_above)
     }
 
@@ -43,15 +52,25 @@ impl CTNode {
     /// 
     /// # Returns
     /// A normalized probability vector representing the upward message.
-    fn message_up(&self, answer_size: usize, other_joint_vector: &[f32], planner: &mut FftPlanner<f32>) -> Vec<f32> {
+    fn message_up(&self, answer_size: usize, other_joint_vector: &[f32]) -> Vec<f32> {
         let likelihood = self.likelihood_below.as_ref().expect("Likelihood below is None!");
-        let starting_point = other_joint_vector.len() - 1;
-        let result = fft_convolve(
-            &other_joint_vector.iter().rev().cloned().collect::<Vec<f32>>(),
-            likelihood,
-            planner
-        );
-        let mut result = result[starting_point..starting_point + answer_size].to_vec();
+        // result[k] = sum_j other_joint_vector[j] * likelihood[j + k], for k < answer_size
+        let mut result = if other_joint_vector.len().min(likelihood.len()) <= DIRECT_CONVOLUTION_MAX_LEN {
+            (0..answer_size)
+                .map(|k| other_joint_vector.iter()
+                    .zip(likelihood.iter().skip(k))
+                    .map(|(other, likelihood)| other * likelihood)
+                    .sum())
+                .collect()
+        } else {
+            let starting_point = other_joint_vector.len() - 1;
+            let result = FFT_PLANNER.with(|planner| fft_convolve(
+                &other_joint_vector.iter().rev().cloned().collect::<Vec<f32>>(),
+                likelihood,
+                &mut planner.borrow_mut()
+            ));
+            result[starting_point..starting_point + answer_size].to_vec()
+        };
         normalize(&mut result);
         result
     }
@@ -71,7 +90,6 @@ pub struct ConvolutionTree {
     all_layers: Vec<Vec<CTNode>>,
     protein_layer: Vec<CTNode>,
     n_proteins: usize,
-    planner: FftPlanner<f32>,
 }
 
 impl ConvolutionTree {
@@ -91,7 +109,6 @@ impl ConvolutionTree {
             all_layers: Vec::new(),
             protein_layer: Vec::new(),
             n_proteins: proteins.len(),
-            planner: FftPlanner::new()
         };
 
         tree.build_first_layer(proteins);
@@ -124,10 +141,8 @@ impl ConvolutionTree {
             let most_recent_layer = self.all_layers.last().ok_or("last() called on an empty vector")?;
             let mut new_layer = Vec::new();
 
-            for i in (0..most_recent_layer.len()).step_by(2) {
-                let left = most_recent_layer[i].clone();
-                let right = most_recent_layer[i + 1].clone();
-                new_layer.push(CTNode::create_count_node(left, right, &mut self.planner));
+            for [left, right] in most_recent_layer.as_chunks::<2>().0 {
+                new_layer.push(CTNode::create_count_node(left, right));
             }
 
             self.all_layers.push(new_layer);
@@ -150,8 +165,8 @@ impl ConvolutionTree {
                 let right_parent = &self.all_layers[l-1][2*i + 1];
                 let node = &self.all_layers[l][i];
 
-                let likelihood_below_left = Some(node.message_up(left_parent.joint_above.len(), &right_parent.joint_above, &mut self.planner));
-                let likelihood_below_right = Some(node.message_up(right_parent.joint_above.len(), &left_parent.joint_above, &mut self.planner));
+                let likelihood_below_left = Some(node.message_up(left_parent.joint_above.len(), &right_parent.joint_above));
+                let likelihood_below_right = Some(node.message_up(right_parent.joint_above.len(), &left_parent.joint_above));
 
                 self.all_layers[l-1][2*i].likelihood_below = likelihood_below_left;
                 self.all_layers[l-1][2*i+1].likelihood_below = likelihood_below_right;
@@ -180,6 +195,29 @@ impl ConvolutionTree {
 
         // Extract the required range
         Ok(self.all_layers.last().ok_or("last() called on an empty vector")?[0].joint_above[..=self.n_proteins].to_vec())
+    }
+}
+
+
+/// Convolves two probability vectors: directly for short vectors, otherwise with an FFT.
+///
+/// # Arguments
+/// * `a` - First probability vector.
+/// * `b` - Second probability vector.
+///
+/// # Returns
+/// A new vector of length `a.len() + b.len() - 1` representing the convolution of `a` and `b`.
+fn convolve(a: &[f32], b: &[f32]) -> Vec<f32> {
+    if a.len().min(b.len()) <= DIRECT_CONVOLUTION_MAX_LEN {
+        let mut result = vec![0.0; a.len() + b.len() - 1];
+        for (i, &x) in a.iter().enumerate() {
+            for (j, &y) in b.iter().enumerate() {
+                result[i + j] += x * y;
+            }
+        }
+        result
+    } else {
+        FFT_PLANNER.with(|planner| fft_convolve(a, b, &mut planner.borrow_mut()))
     }
 }
 
@@ -231,8 +269,7 @@ mod tests {
     fn test_create_count_node_convolution() {
         let lhs = CTNode::new(vec![1.0, 0.0]);
         let rhs = CTNode::new(vec![0.0, 1.0]);
-        let mut planner = FftPlanner::new();
-        let node = CTNode::create_count_node(lhs, rhs, &mut planner);
+        let node = CTNode::create_count_node(&lhs, &rhs);
         assert_eq!(node.joint_above.len(), 3);
         let sum: f32 = node.joint_above.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
@@ -244,8 +281,7 @@ mod tests {
         let mut node = CTNode::new(vec![0.5, 0.5]);
         node.likelihood_below = Some(vec![0.5, 0.5]);
         let sibling_joint = vec![0.5, 0.5];
-        let mut planner = FftPlanner::new();
-        let msg = node.message_up(2, &sibling_joint, &mut planner);
+        let msg = node.message_up(2, &sibling_joint);
         let sum: f32 = msg.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
 
@@ -279,6 +315,55 @@ mod tests {
         assert!(msg.is_ok());
         let msg = msg.unwrap();
         assert_eq!(msg.len(), tree.n_proteins + 1);
+    }
+
+    /// Deterministic pseudo-random probability vector of length `n` for comparing the two convolution paths.
+    fn test_vector(n: usize, seed: u32) -> Vec<f32> {
+        let mut state = seed;
+        (0..n).map(|_| { state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223); (state >> 8) as f32 / (1u32 << 24) as f32 + 1e-3 }).collect()
+    }
+
+    /// Checks that direct convolution (short vectors) and FFT convolution (long vectors) give the same result.
+    #[test]
+    fn test_direct_and_fft_convolution_agree() {
+        for (n, m) in [(2, 2), (3, 70), (64, 65), (100, 130)] {
+            let (a, b) = (test_vector(n, 1), test_vector(m, 2));
+            let fft = FFT_PLANNER.with(|planner| fft_convolve(&a, &b, &mut planner.borrow_mut()));
+            let direct = convolve(&a, &b);
+            let mut exact = vec![0.0f64; n + m - 1];
+            for (i, x) in a.iter().enumerate() {
+                for (j, y) in b.iter().enumerate() {
+                    exact[i + j] += *x as f64 * *y as f64;
+                }
+            }
+            for k in 0..exact.len() {
+                let scale = exact[k].abs().max(1.0);
+                assert!((direct[k] as f64 - exact[k]).abs() / scale < 1e-4, "direct convolution ({n}, {m}) index {k}");
+                assert!((fft[k] as f64 - exact[k]).abs() / scale < 1e-4, "fft convolution ({n}, {m}) index {k}");
+            }
+        }
+    }
+
+    /// Checks that the direct and FFT paths of `message_up` agree.
+    #[test]
+    fn test_message_up_direct_and_fft_agree() {
+        for (other_len, likelihood_len) in [(3, 5), (65, 129), (100, 199)] {
+            let mut node = CTNode::new(test_vector(likelihood_len, 3));
+            node.likelihood_below = Some(test_vector(likelihood_len, 4));
+            let other = test_vector(other_len, 5);
+            let answer_size = likelihood_len - other_len + 1;
+            let message = node.message_up(answer_size, &other);
+
+            let likelihood = node.likelihood_below.as_ref().unwrap();
+            let mut exact: Vec<f64> = (0..answer_size)
+                .map(|k| other.iter().enumerate().map(|(j, o)| *o as f64 * likelihood[j + k] as f64).sum())
+                .collect();
+            let total: f64 = exact.iter().sum();
+            exact.iter_mut().for_each(|value| *value /= total);
+            for k in 0..answer_size {
+                assert!((message[k] as f64 - exact[k]).abs() < 1e-5, "message_up ({other_len}, {likelihood_len}) index {k}");
+            }
+        }
     }
 
     /// Checks FFT-based convolution produces correct results for a simple case.

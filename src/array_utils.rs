@@ -1,23 +1,30 @@
 
 include!(concat!(env!("OUT_DIR"), "/log_table.rs"));
 
-const N: usize = 1024;
-const MIN_X: f32 = 1e-10;
-const MAX_X: f32 = 1.0;
-const STEP: f32 = (MAX_X - MIN_X) / (N as f32 - 1.0);
+/// Number of mantissa bits below the bits that index `LOG_TABLE`; used for interpolation.
+const FRACTION_BITS: u32 = 23 - LOG_TABLE_BITS;
 
 
 /// Approximates the natural logarithm of `x` using a precomputed lookup table.
 ///
+/// `x` is split into its binary exponent `e` and mantissa `m` in `[1, 2)`, so that `ln(x) = e * ln(2) + ln(m)`.
+/// `ln(m)` is interpolated linearly between the two nearest entries of `LOG_TABLE`. The absolute error is at most
+/// about `3e-6` for every positive `x`, which is close to `f32::ln` but faster (especially in WebAssembly, which has
+/// no native logarithm instruction).
+///
 /// # Arguments
-/// * `x` - Input value between `MIN_X` and `MAX_X`.
+/// * `x` - Positive input value. Values below `f32::MIN_POSITIVE` (including 0) are treated as `f32::MIN_POSITIVE`.
 ///
 /// # Returns
-/// * Approximate value of `ln(x)` retrieved from a static lookup table.
+/// * Approximate value of `ln(x)`.
 #[inline(always)]
 pub fn ln_from_table(x: f32) -> f32 {
-    let idx = ((x - MIN_X) / STEP) as usize;
-    LOG_TABLE[idx] as f32
+    let bits = x.max(f32::MIN_POSITIVE).to_bits();
+    let exponent = (bits >> 23) as i32 - 127;
+    let mantissa = bits & 0x7f_ffff;
+    let index = (mantissa >> FRACTION_BITS) as usize;
+    let fraction = (mantissa & ((1 << FRACTION_BITS) - 1)) as f32 / (1 << FRACTION_BITS) as f32;
+    exponent as f32 * std::f32::consts::LN_2 + LOG_TABLE[index] + fraction * (LOG_TABLE[index + 1] - LOG_TABLE[index])
 }
 
 
@@ -139,6 +146,32 @@ mod tests {
         log_normalize(&mut values);
         let sum: f32 = values[0] + values[1];
         assert!((sum - 1.0).abs() < 1e-12);
+    }
+
+    /// Verifies that the table-based logarithm is close to `f64::ln` over the whole range of positive `f32` values,
+    /// including very small values and values close to each other.
+    #[test]
+    fn test_ln_from_table_accuracy() {
+        let mut x: f32 = 1e-37;
+        while x < 1e3 {
+            let expected = (x as f64).ln();
+            let error = (ln_from_table(x) as f64 - expected).abs();
+            // Allow for the f32 rounding of large results (|ln x| is up to ~85 here).
+            assert!(error < 3e-6 + 2e-7 * expected.abs(), "ln_from_table({x}) is off by {error}");
+            x *= 1.001;
+        }
+
+        // Messages that differ slightly must give different logarithms.
+        assert!(ln_from_table(0.5001) > ln_from_table(0.5));
+    }
+
+    /// Verifies that the table-based logarithm stays finite for 0 and subnormal inputs.
+    #[test]
+    fn test_ln_from_table_small_inputs() {
+        let expected = f32::MIN_POSITIVE.ln();
+        for x in [0.0, 1e-45, 1e-40] {
+            assert!((ln_from_table(x) - expected).abs() < 1e-4);
+        }
     }
 
     /// Verifies that underflow protection replaces values below the minimum threshold.
