@@ -222,7 +222,18 @@ pub struct Messages<'a> {
     // incoming messages for each node [end node][neighbour id]
     msg_in: Vec<MessagesInNode>,
     msg_in_new: Vec<MessagesInNode>,
-    msg_in_log: Vec<MessagesInNode>
+    msg_in_log: Vec<MessagesInNode>,
+    // For each convolution tree node: the incoming messages it was last built with (None if not built yet)
+    ct_last_build: Vec<Option<Box<CTBuildInputs>>>,
+    // A convolution tree is rebuilt only when its outgoing messages can change by more than this (log space)
+    ct_rebuild_tolerance: f32,
+}
+
+
+/// The incoming messages a convolution tree was last built with.
+struct CTBuildInputs {
+    shared_likelihoods: Vec<f32>,
+    variable_messages: Vec<[f32; 2]>,
 }
 
 
@@ -291,7 +302,9 @@ impl<'a> Messages<'a> {
 
         let msg_in_log = msg_in.clone();
 
-        Messages { graph: ct_graph_in, priorities, pending_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log }
+        let ct_last_build = (0..ct_graph_in.node_count()).map(|_| None).collect();
+
+        Messages { graph: ct_graph_in, priorities, pending_residuals, current_beliefs, msg_in, msg_in_new, msg_in_log, ct_last_build, ct_rebuild_tolerance: 0.0 }
 
     }
 
@@ -328,6 +341,10 @@ impl<'a> Messages<'a> {
     pub fn zero_lookahead_bp(&mut self, max_loops: u32, tolerance: f32) -> Result<BeliefResult, Box<dyn std::error::Error>> {
 
         let mut max_residual: f32 = f32::MAX;
+
+        self.ct_rebuild_tolerance = tolerance;
+        self.initialize_messages()?;
+        self.msg_in_log = self.msg_in.clone();
 
         // first, do 5 loops where I update all messages
         for _ in 0..5 {
@@ -424,6 +441,92 @@ impl<'a> Messages<'a> {
             .collect();
 
         output_beliefs
+    }
+
+    /// Sets the messages that never change to their final value, and the messages from output variables to their
+    /// prior, so that the first build of each convolution tree already uses the evidence and the priors.
+    ///
+    /// Input variable nodes have one neighbour (their factor), so their message is always their belief. The messages
+    /// from a factor to its convolution tree or output variable only depend on that message.
+    fn initialize_messages(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let graph = self.graph;
+
+        for node in graph.get_nodes() {
+            if let NodeType::Variable { output: false, initial_belief, .. } = node.get_subtype() {
+                for neighbor_index in 0..node.neighbors_count() {
+                    let (neighbor_id, index_in_neighbor) = graph.get_neighbor_node_and_neighbor_id(node, neighbor_index);
+                    self.msg_in[neighbor_id].set_message(index_in_neighbor, *initial_belief);
+                }
+            }
+        }
+
+        for node in graph.get_nodes().iter().filter(|node| node.is_factor_node()) {
+            for neighbor_index in 0..node.neighbors_count() {
+                let (neighbor_id, index_in_neighbor) = graph.get_neighbor_node_and_neighbor_id(node, neighbor_index);
+                let neighbor = graph.get_node(neighbor_id);
+                if neighbor.is_convolution_tree_node() {
+                    let message = self.compute_out_message_factor_ctree(node.get_id(), neighbor_id, neighbor_index)?;
+                    self.msg_in[neighbor_id].set_ct_message(message)?;
+                } else if neighbor.is_output_node() {
+                    let message = self.compute_out_message_factor(node.get_id(), neighbor_id, neighbor_index, index_in_neighbor)?;
+                    self.msg_in[neighbor_id].set_message(index_in_neighbor, message);
+                }
+            }
+        }
+
+        // All outgoing messages of an output variable at once: the sum of the logs of the prior and all incoming
+        // messages is computed once, and each outgoing message leaves out the incoming message from its receiver.
+        for node in graph.get_nodes().iter().filter(|node| node.is_output_node()) {
+            let belief = self.current_beliefs[node.get_id()].variable_values().ok_or("Output node should have a variable belief")?;
+            let incoming = self.msg_in[node.get_id()].get_messages();
+            let outgoing: Vec<[f32; 2]> = if incoming.len() <= 1 {
+                vec![belief; incoming.len()]
+            } else {
+                let mut total = [belief[0].ln(), belief[1].ln()];
+                for message in incoming {
+                    total[0] += ln_from_table(message[0]);
+                    total[1] += ln_from_table(message[1]);
+                }
+                incoming.iter().map(|message| {
+                    let mut out = [total[0] - ln_from_table(message[0]), total[1] - ln_from_table(message[1])];
+                    log_normalize(&mut out);
+                    avoid_underflow_arr(&mut out);
+                    out
+                }).collect()
+            };
+            for (neighbor_index, message) in outgoing.into_iter().enumerate() {
+                let (neighbor_id, index_in_neighbor) = graph.get_neighbor_node_and_neighbor_id(node, neighbor_index);
+                self.msg_in[neighbor_id].set_message(index_in_neighbor, message);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns whether the convolution tree `ct_id` must be rebuilt: it was never built, the message from its factor
+    /// changed, or the messages from its variable nodes changed enough that an outgoing message could change by more
+    /// than `ct_rebuild_tolerance`.
+    ///
+    /// Every outgoing message of the tree is a sum of products that contain each incoming variable message once. If
+    /// incoming message `i` changed by at most a factor `exp(d_i)` per entry, every outgoing message changes by at
+    /// most a factor `exp(sum_i d_i)`. So `sum_i d_i <= ct_rebuild_tolerance` guarantees that a rebuild would not
+    /// change any outgoing message by more than the tolerance.
+    fn convolution_tree_needs_rebuild(&self, ct_id: usize) -> Result<bool, Box<dyn std::error::Error>> {
+        let Some(last_build) = &self.ct_last_build[ct_id] else {
+            return Ok(true);
+        };
+        if last_build.shared_likelihoods != *self.msg_in[ct_id].get_ct_message()? {
+            return Ok(true);
+        }
+
+        let mut change = 0.0;
+        for (new, old) in self.msg_in[ct_id].get_messages().iter().zip(&last_build.variable_messages) {
+            change += (new[0] / old[0]).ln().abs().max((new[1] / old[1]).ln().abs());
+            if change > self.ct_rebuild_tolerance {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Updates all outgoing messages from all nodes.
@@ -579,18 +682,11 @@ impl<'a> Messages<'a> {
         let prot_list: &[usize] = &neighbor_list[1..];
         let (factor_id, _) = self.graph.get_neighbor_node_and_neighbor_id(start_node, 0);
         
-        let shared_likelihoods: &Vec<f32> = self.msg_in[start_id].get_ct_message()?;
-        let old_shared_likelihoods: &Vec<f32> = self.msg_in_log[start_id].get_ct_message()?;
-
-        let prot_prob_list: &Vec<[f32; 2]> = self.msg_in[start_id].get_messages();
-
-        let old_prot_prob_list: &Vec<[f32; 2]> = self.msg_in_log[start_id].get_messages();
-
-        // Recompute the tree when any incoming message changed: the shared likelihood from the factor
-        // or the message from at least one variable node.
-        if old_shared_likelihoods != shared_likelihoods ||
-            prot_prob_list.iter().zip(old_prot_prob_list.iter()).any(|(a, b)| a[0] != b[0]) {
-            let convolution_tree = ConvolutionTree::new(shared_likelihoods.clone(), prot_prob_list.clone())?;
+        if self.convolution_tree_needs_rebuild(start_id)? {
+            let shared_likelihoods: Vec<f32> = self.msg_in[start_id].get_ct_message()?.clone();
+            let variable_messages: Vec<[f32; 2]> = self.msg_in[start_id].get_messages().clone();
+            let convolution_tree = ConvolutionTree::new(shared_likelihoods.clone(), variable_messages.clone())?;
+            self.ct_last_build[start_id] = Some(Box::new(CTBuildInputs { shared_likelihoods, variable_messages }));
 
             for (protein_id, protein) in prot_list.iter().enumerate() {
                 let (_, node_neighbor_index): (usize, usize) = self.graph.get_neighbor_node_and_neighbor_id(start_node, protein_id+1);

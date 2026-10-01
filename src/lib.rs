@@ -289,6 +289,16 @@ mod tests {
         }
     }
 
+    /// Evidence has to pass through several convolution trees, so more message updates are needed than for the
+    /// other tree-shaped graphs.
+    #[test]
+    fn test_chain_of_shared_peptides_matches_exact() {
+        let edges = [("P1", "F1"), ("P2", "F1"), ("P2", "F2"), ("P3", "F2"), ("P3", "F3"), ("P3", "F4"), ("P4", "F4"), ("P4", "F5")];
+        for prior in [0.3, 0.01] {
+            assert_matches_exact(&edges, prior, 1e-4);
+        }
+    }
+
     /// Several convolution trees in one tree-shaped graph.
     #[test]
     fn test_multiple_shared_peptides_matches_exact() {
